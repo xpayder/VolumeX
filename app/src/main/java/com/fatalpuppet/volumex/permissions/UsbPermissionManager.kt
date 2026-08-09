@@ -26,7 +26,9 @@ class UsbPermissionManager(
         val intent = PendingIntent.getBroadcast(
             context,
             0,
-            Intent(ACTION_USB_PERMISSION),
+            Intent(ACTION_USB_PERMISSION).setPackage(
+                context.packageName
+            ),
             PendingIntent.FLAG_UPDATE_CURRENT or
                     PendingIntent.FLAG_MUTABLE
         )

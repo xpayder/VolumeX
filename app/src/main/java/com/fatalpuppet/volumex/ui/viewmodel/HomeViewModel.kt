@@ -37,6 +37,7 @@ class HomeViewModel : ViewModel() {
         fun onUsbChanged() {
         scanUsbDevices()
     }
+
     fun onUsbAttached() {
         scanUsbDevices()
         updateUsbState(
@@ -72,8 +73,26 @@ class HomeViewModel : ViewModel() {
         usbRepository = UsbRepository(context)
         usbRepository?.registerReceiver(
             onAttach = ::onUsbAttached,
-            onDetach = ::onUsbDetached
+            onDetach = ::onUsbDetached,
+            onPermissionGranted = ::onUsbPermissionGranted
         )
+    }
+    fun onUsbPermissionGranted(
+        device: UsbDevice
+    ) {
+        val repository = usbRepository ?: return
+
+        if (repository.openDeviceAfterPermission(device)) {
+            updateUsbState(
+                UsbState.CONNECTED,
+                "USB drive opened"
+            )
+        } else {
+            updateUsbState(
+                UsbState.ERROR,
+                "USB drive could not be opened"
+            )
+        }
     }
 
     fun readFirstSector() {

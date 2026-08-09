@@ -40,4 +40,33 @@ class ScsiCommandExecutor(
             "OK"
         )
     }
+
+    fun inquiry(): ScsiResult {
+        return execute(
+            ScsiInquiry.command(),
+            36
+        )
+    }
+
+    fun testUnitReady(): ScsiResult {
+
+        val command = ScsiTestUnitReady.command()
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = 0,
+            flags = 0.toByte(),
+            lun = 0.toByte(),
+            commandLength = command.size.toByte(),
+            command = command
+        )
+
+        return execute(
+            CommandBlockWrapperBuilder.build(cbw),
+            ScsiTestUnitReady.EXPECTED_LENGTH
+        )
+
+    }
+
+
+
 }

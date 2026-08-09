@@ -6,6 +6,7 @@ import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.scsi.ScsiCommandFactory
 import com.fatalpuppet.volumex.storage.scsi.ScsiDebug
 import com.fatalpuppet.volumex.storage.scsi.ScsiExecutor
+import com.fatalpuppet.volumex.storage.scsi.ScsiInquiryResponseParser
 import com.fatalpuppet.volumex.storage.scsi.ScsiTransaction
 
 class UsbBlockDeviceReader(
@@ -37,15 +38,51 @@ class UsbBlockDeviceReader(
 
     override fun open(): Boolean {
         connection = usbManager.openDevice(device)
-            ?: return false
+        if (connection == null) {
+            Log.e(
+                "VolumeX",
+                "UsbBlockDeviceReader.open(): openDevice() returned null"
+            )
+            return false
+        }
+        Log.d(
+            "VolumeX",
+            "UsbDeviceConnection opened"
+        )
+
         interfaceScanner.inspectDevice(device)
+
         massStorage =
             interfaceScanner.findMassStorageInterface(device)
-                ?: return false
+
+        if (massStorage == null) {
+            Log.e(
+                "VolumeX",
+                "UsbBlockDeviceReader.open(): Mass Storage interface not found"
+            )
+            return false
+        }
+        Log.d(
+            "VolumeX",
+            "Mass Storage interface found"
+        )
+
         claimed = connection!!.claimInterface(
             massStorage!!.usbInterface,
             true
         )
+        Log.d(
+            "VolumeX",
+            "USB interface claimed = $claimed"
+        )
+        if (!claimed) {
+            Log.e(
+                "VolumeX",
+                "UsbBlockDeviceReader.open(): claimInterface() failed"
+            )
+            return false
+        }
+
         Log.d("VolumeX", "UsbBlockDeviceReader.open()")
         if (claimed) {
             transport = BulkUsbTransport(
@@ -65,11 +102,114 @@ class UsbBlockDeviceReader(
         Log.d("VolumeX", "Calling TEST UNIT READY")
 
         Log.d("VolumeX", "Logging transaction")
+
+/*
+        Log.d("VolumeX", "Calling SCSI INQUIRY")
+        val inquiryTransaction = scsiExecutor?.inquiry()
         ScsiDebug.transaction(transaction)
-        Log.d(
-            "VolumeX",
-            "USB interface claimed = $claimed"
-        )
+        inquiryTransaction.data?.let { data ->
+            Log.d(
+                "VolumeX",
+                "INQUIRY response length = ${data.size}"
+            )
+            Log.d(
+                "VolumeX",
+                "INQUIRY raw = ${
+                    data.joinToString(" ") {
+                        "%02X".format(it)
+                    }
+                }"
+            )
+        }
+
+
+
+        if (inquiryTransaction == null) {
+            Log.e(
+                "VolumeX",
+                "SCSI INQUIRY: executor unavailable"
+            )
+        } else {
+            Log.d(
+                "VolumeX",
+                "SCSI INQUIRY success = ${inquiryTransaction.success}"
+            )
+
+            Log.d(
+                "VolumeX",
+                "SCSI INQUIRY message = ${inquiryTransaction.message}"
+            )
+
+            ScsiDebug.transaction(inquiryTransaction)
+        }
+
+
+*/
+
+        Log.d("VolumeX", "Calling SCSI INQUIRY")
+
+        val inquiryTransaction = scsiExecutor?.inquiry()
+
+        if (inquiryTransaction != null) {
+            ScsiDebug.transaction(inquiryTransaction)
+            inquiryTransaction.data?.let { data ->
+                Log.d(
+                    "VolumeX",
+                    "INQUIRY response length = ${data.size}"
+                )
+                Log.d(
+                    "VolumeX",
+                    "INQUIRY raw = ${
+                        data.joinToString(" ") {
+                            "%02X".format(it)
+                        }
+                    }"
+                )
+
+                val inquiry =
+                    ScsiInquiryResponseParser.parse(data)
+
+                if (inquiry != null) {
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY Vendor = ${inquiry.vendor}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY Product = ${inquiry.product}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY Revision = ${inquiry.revision}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY Removable = ${inquiry.removable}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY Device Type = ${inquiry.peripheralDeviceType}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "INQUIRY SCSI Version = ${inquiry.scsiVersion}"
+                    )
+                }
+
+            }
+        } else {
+            Log.e(
+                "VolumeX",
+                "SCSI INQUIRY: executor unavailable"
+            )
+        }
+        Log.d("VolumeX", "USB interface claimed = $claimed")
         return claimed
     }
     override fun close() {

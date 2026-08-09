@@ -101,3 +101,33 @@
 - Simplified USB event registration.
 - Removed duplicate repository methods.
 - Cleaned orchestration between HomeScreen, HomeViewModel and UsbRepository.
+
+## [0.5.0] - 2026-08-09
+
+### Added
+- Initial USB Mass Storage SCSI communication.
+- Added SCSI TEST UNIT READY command support.
+- Added SCSI INQUIRY command support.
+- Added SCSI INQUIRY response parsing.
+- Added USB storage device identification.
+- Added detection of:
+    - Device type
+    - Removable media status
+    - SCSI version
+    - Vendor
+    - Product
+    - Revision
+- Added SCSI transaction response data for diagnostic purposes.
+
+### Improved
+- Improved USB Mass Storage device initialization.
+- Improved USB permission and device-opening workflow.
+- Improved SCSI diagnostic logging.
+- Improved USB device debugging and connection diagnostics.
+
+### Tested
+- Successfully tested against a physical Kingston DT microDuo 3C USB storage device.
+- Successfully opened the device after Android USB permission was granted.
+- Successfully claimed the USB Mass Storage interface.
+- Successfully executed TEST UNIT READY.
+- Successfully executed and parsed SCSI INQUIRY.

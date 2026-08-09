@@ -6,6 +6,7 @@ import android.hardware.usb.UsbManager
 import com.fatalpuppet.volumex.services.UsbService
 import com.fatalpuppet.volumex.storage.disk.DiskScanner
 import com.fatalpuppet.volumex.storage.usb.UsbBlockDeviceReader
+import com.fatalpuppet.volumex.permissions.UsbPermissionManager
 
 class UsbRepository(
     private val context: Context
@@ -13,14 +14,17 @@ class UsbRepository(
     private var blockDeviceReader: UsbBlockDeviceReader? = null
     private val usbService = UsbService(context)
     private val diskScanner = DiskScanner()
+    private val permissionManager = UsbPermissionManager(context)
 
     fun registerReceiver(
         onAttach: () -> Unit,
-        onDetach: () -> Unit
+        onDetach: () -> Unit,
+        onPermissionGranted: (UsbDevice) -> Unit
     ) {
         usbService.registerReceiver(
             onAttach,
-            onDetach
+            onDetach,
+            onPermissionGranted
         )
     }
     fun isUsbSupported() =
@@ -36,7 +40,13 @@ class UsbRepository(
             ?: return false
         return openDevice(device)
     }
-    fun openDevice(device: UsbDevice): Boolean {
+    fun openDevice(
+        device: UsbDevice
+    ): Boolean {
+        if (!permissionManager.hasPermission(device)) {
+            permissionManager.requestPermission(device)
+            return false
+        }
         val usbManager =
             context.getSystemService(
                 Context.USB_SERVICE
@@ -45,6 +55,7 @@ class UsbRepository(
             usbManager,
             device
         )
+
         if (!reader.open()) {
             return false
         }
@@ -72,5 +83,10 @@ class UsbRepository(
             blockDeviceReader
                 ?: return null
         return reader.readSector(0)
+    }
+    fun openDeviceAfterPermission(
+        device: UsbDevice
+    ): Boolean {
+        return openDevice(device)
     }
 }

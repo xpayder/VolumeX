@@ -10,5 +10,7 @@ data class ScsiTransaction(
 
     val message: String,
 
+    val data: ByteArray? = null,
+
     val timestamp: Long = System.currentTimeMillis()
 )

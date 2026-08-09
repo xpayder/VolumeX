@@ -6,9 +6,10 @@ import android.hardware.usb.UsbManager
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.util.Log
+import android.content.Intent
 
-import com.fatalpuppet.volumex.data.models.UsbDeviceInfo
 import com.fatalpuppet.volumex.permissions.UsbPermissionManager
+import com.fatalpuppet.volumex.data.models.UsbDeviceInfo
 
 class UsbService(
     private val context: Context
@@ -68,15 +69,17 @@ class UsbService(
     fun registerReceiver(
         onAttach: () -> Unit,
         onDetach: () -> Unit,
+        onPermissionGranted: (UsbDevice) -> Unit
     ) {
         receiver = UsbBroadcastReceiver(
             onAttach,
-            onDetach
+            onDetach,
+            onPermissionGranted
         )
-        Log.d("VolumeX", "USB receiver registered")
         val filter = IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            addAction(UsbPermissionManager.ACTION_USB_PERMISSION)
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(
@@ -89,6 +92,10 @@ class UsbService(
             context.registerReceiver(
                 receiver,
                 filter
+            )
+            Log.d(
+                "VolumeX",
+                "USB receiver registered"
             )
         }
     }
