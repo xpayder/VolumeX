@@ -3,6 +3,7 @@ package com.fatalpuppet.volumex.storage.usb
 import android.hardware.usb.*
 import android.util.Log
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
+import com.fatalpuppet.volumex.storage.scsi.ScsiCapacityResponseParser
 import com.fatalpuppet.volumex.storage.scsi.ScsiCommandFactory
 import com.fatalpuppet.volumex.storage.scsi.ScsiDebug
 import com.fatalpuppet.volumex.storage.scsi.ScsiExecutor
@@ -209,8 +210,72 @@ class UsbBlockDeviceReader(
                 "SCSI INQUIRY: executor unavailable"
             )
         }
+
+
+        Log.d("VolumeX", "Calling SCSI READ CAPACITY(10)")
+
+        val capacityTransaction = scsiExecutor?.readCapacity()
+
+        if (capacityTransaction != null) {
+
+            ScsiDebug.transaction(capacityTransaction)
+
+            capacityTransaction.data?.let { data ->
+
+                Log.d(
+                    "VolumeX",
+                    "READ CAPACITY response length = ${data.size}"
+                )
+
+                Log.d(
+                    "VolumeX",
+                    "READ CAPACITY raw = ${
+                        data.joinToString(" ") {
+                            "%02X".format(it)
+                        }
+                    }"
+                )
+
+                val capacity =
+                    ScsiCapacityResponseParser.parse(data)
+
+                if (capacity != null) {
+
+                    Log.i(
+                        "VolumeX",
+                        "Last LBA = ${capacity.lastLogicalBlockAddress}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "Block size = ${capacity.blockSize} bytes"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "Block count = ${capacity.blockCount}"
+                    )
+
+                    Log.i(
+                        "VolumeX",
+                        "Capacity = ${capacity.capacityBytes} bytes"
+                    )
+                }
+
+            }
+
+        } else {
+
+            Log.e(
+                "VolumeX",
+                "READ CAPACITY: executor unavailable"
+            )
+        }
+
         Log.d("VolumeX", "USB interface claimed = $claimed")
         return claimed
+
+
     }
     override fun close() {
         if (claimed) {

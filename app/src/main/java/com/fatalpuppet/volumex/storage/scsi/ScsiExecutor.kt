@@ -41,4 +41,23 @@ class ScsiExecutor(
             expectedLength = 36
         )
     }
+
+    fun readCapacity(): ScsiTransaction {
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = 8,
+            flags = 0x80.toByte(),
+            lun = 0,
+            commandLength = 10,
+            command = ScsiReadCapacity.command()
+        )
+
+        return execute(
+            name = "READ CAPACITY(10)",
+            cbw = cbw,
+            expectedLength = 8
+        )
+    }
+
+
 }

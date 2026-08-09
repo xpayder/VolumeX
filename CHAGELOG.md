@@ -118,6 +118,9 @@
     - Product
     - Revision
 - Added SCSI transaction response data for diagnostic purposes.
+- Added SCSI READ CAPACITY(10) support.
+- Added logical block size and storage capacity detection.
+- Added SCSI capacity response parsing.
 
 ### Improved
 - Improved USB Mass Storage device initialization.

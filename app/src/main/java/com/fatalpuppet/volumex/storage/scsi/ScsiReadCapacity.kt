@@ -1,9 +1,19 @@
 package com.fatalpuppet.volumex.storage.scsi
 
 object ScsiReadCapacity {
+
     fun command(): ByteArray {
-
-        return ByteArray(10)
-
+        return byteArrayOf(
+            ScsiOpcodes.READ_CAPACITY_10,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        )
     }
 }

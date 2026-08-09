@@ -8,7 +8,7 @@ object ScsiOpcodes {
 
     const val INQUIRY: Byte = 0x12
 
-    const val READ_CAPACITY: Byte = 0x25
+    const val READ_CAPACITY_10: Byte = 0x25
 
     const val READ10: Byte = 0x28
 
