@@ -134,3 +134,28 @@
 - Successfully claimed the USB Mass Storage interface.
 - Successfully executed TEST UNIT READY.
 - Successfully executed and parsed SCSI INQUIRY.
+
+## [Unreleased]
+
+### Added
+- Added initial filesystem package structure.
+- Added initial APFS container superblock model and parser.
+- Added initial exFAT boot-sector model and parser as groundwork for future filesystem support.
+- Organized filesystem implementations under `storage/filesystem/`.
+
+### Completed
+- USB mass-storage device detection and permission handling.
+- USB bulk transport.
+- USB Mass Storage Bulk-Only Transport.
+- SCSI TEST UNIT READY.
+- SCSI INQUIRY.
+- SCSI READ CAPACITY (10).
+- SCSI READ (10).
+- MBR partition table detection and parsing.
+- Successful raw sector reads from USB storage devices.
+
+### Next
+- Validate APFS partition layout, including GPT handling where required.
+- Locate and validate the APFS container superblock (`NXSB`).
+- Begin APFS container and volume parsing.
+- Eventually expose the APFS directory structure and files.

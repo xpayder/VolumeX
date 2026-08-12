@@ -60,4 +60,50 @@ class ScsiExecutor(
     }
 
 
+    fun read10(
+        lba: Long,
+        blockCount: Int,
+        blockSize: Int
+    ): ScsiTransaction {
+
+        val transferLength = blockCount * blockSize
+
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = transferLength,
+            flags = 0x80.toByte(),
+            lun = 0,
+            commandLength = 10,
+            command = ScsiRead10.command(
+                lba = lba,
+                transferLength = blockCount
+            )
+        )
+
+        android.util.Log.d(
+            "VolumeX",
+            "READ(10) CDB = ${
+                cbw.command.joinToString(" ") {
+                    "%02X".format(it)
+                }
+            }"
+        )
+
+        android.util.Log.d(
+            "VolumeX",
+            "READ(10) CBW tag=${cbw.tag} " +
+                    "transferLength=${cbw.dataTransferLength} " +
+                    "flags=%02X".format(cbw.flags) +
+                    " commandLength=${cbw.commandLength}"
+        )
+
+        return execute(
+            name = "READ(10) LBA $lba",
+            cbw = cbw,
+            expectedLength = transferLength
+        )
+    }
+
+
+
 }

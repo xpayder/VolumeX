@@ -3,31 +3,28 @@ package com.fatalpuppet.volumex.storage.scsi
 object ScsiRead10 {
 
     fun command(
-
         lba: Long,
-
-        blocks: Int
-
+        transferLength: Int
     ): ByteArray {
 
-        val cmd = ByteArray(10)
+        require(lba in 0..0xFFFFFFFFL)
+        require(transferLength in 1..0xFFFF)
 
-        cmd[0] = 0x28
+        return byteArrayOf(
+            ScsiOpcodes.READ_10,
 
-        cmd[2] = (lba shr 24).toByte()
+            ((lba shr 24) and 0xFF).toByte(),
+            ((lba shr 16) and 0xFF).toByte(),
+            ((lba shr 8) and 0xFF).toByte(),
+            (lba and 0xFF).toByte(),
 
-        cmd[3] = (lba shr 16).toByte()
+            0,
 
-        cmd[4] = (lba shr 8).toByte()
+            ((transferLength shr 8) and 0xFF).toByte(),
+            (transferLength and 0xFF).toByte(),
 
-        cmd[5] = lba.toByte()
-
-        cmd[7] = (blocks shr 8).toByte()
-
-        cmd[8] = blocks.toByte()
-
-        return cmd
-
+            0,
+            0
+        )
     }
-
 }

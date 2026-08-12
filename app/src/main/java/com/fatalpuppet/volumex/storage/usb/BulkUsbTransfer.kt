@@ -5,9 +5,7 @@ import android.hardware.usb.*
 class BulkUsbTransport(
 
     private val connection: UsbDeviceConnection,
-
     private val bulkIn: UsbEndpoint,
-
     private val bulkOut: UsbEndpoint
 
 ) {
@@ -46,20 +44,19 @@ class BulkUsbTransport(
             timeout
         )
 
+        android.util.Log.d(
+            "VolumeX",
+            "USB bulk IN requested=$size transferred=$transferred"
+        )
+
         return BulkTransferResult(
-
             success = transferred >= 0,
-
             bytesTransferred = transferred,
-
             data =
                 if (transferred > 0)
                     buffer.copyOf(transferred)
                 else
                     null
-
         )
-
     }
-
 }

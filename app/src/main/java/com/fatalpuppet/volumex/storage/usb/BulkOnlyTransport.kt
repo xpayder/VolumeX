@@ -7,7 +7,6 @@ import com.fatalpuppet.volumex.storage.scsi.ScsiResult
 class BulkOnlyTransport(
     private val transport: BulkUsbTransport
 ) {
-
     fun execute(
         cbw: ByteArray,
         expectedLength: Int
@@ -56,5 +55,4 @@ class BulkOnlyTransport(
             "OK"
         )
     }
-
 }
