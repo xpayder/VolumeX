@@ -23,18 +23,34 @@ class BulkOnlyTransport(
         }
 
         val payload =
-            if (expectedLength > 0)
+            if (expectedLength > 0) {
                 transport.receive(expectedLength)
-            else
-                BulkTransferResult(true, 0, null)
+            } else {
+                BulkTransferResult(
+                    true,
+                    0,
+                    null
+                )
+            }
+
+        if (!payload.success) {
+
+            transport.clearBulkInHalt()
+
+            return ScsiResult(
+                false,
+                null,
+                "DATA transfer failed (${payload.bytesTransferred})"
+            )
+        }
 
         val csw = transport.receive(13)
 
         if (!csw.success || csw.data == null) {
             return ScsiResult(
                 false,
-                null,
-                "CSW transfer failed"
+                payload.data,
+                "CSW transfer failed (${csw.bytesTransferred})"
             )
         }
 

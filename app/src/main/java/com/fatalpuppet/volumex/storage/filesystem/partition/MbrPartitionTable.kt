@@ -1,4 +1,4 @@
-package com.fatalpuppet.volumex.storage.partition
+package com.fatalpuppet.volumex.storage.filesystem.partition
 
 data class MbrPartitionEntry(
     val bootable: Boolean,

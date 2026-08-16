@@ -7,7 +7,7 @@ import android.util.Log
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.filesystem.FilesystemDetector
 import com.fatalpuppet.volumex.storage.filesystem.FilesystemType
-import com.fatalpuppet.volumex.storage.partition.MbrPartitionTable
+import com.fatalpuppet.volumex.storage.filesystem.partition.MbrPartitionTable
 import com.fatalpuppet.volumex.storage.scsi.ScsiCapacityResponseParser
 import com.fatalpuppet.volumex.storage.scsi.ScsiCommandFactory
 import com.fatalpuppet.volumex.storage.scsi.ScsiDebug
@@ -16,6 +16,8 @@ import com.fatalpuppet.volumex.storage.scsi.ScsiInquiryResponseParser
 import com.fatalpuppet.volumex.storage.scsi.ScsiTransaction
 import com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatBootSector
 import com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatBootSectorParser
+import com.fatalpuppet.volumex.storage.filesystem.partition.GptPartitionTable
+import com.fatalpuppet.volumex.storage.scsi.UasExecutor
 
 class UsbBlockDeviceReader(
     private val usbManager: UsbManager,
@@ -32,6 +34,7 @@ class UsbBlockDeviceReader(
     private var scsiExecutor: ScsiExecutor? = null
     private var connectionInfo: UsbConnectionInfo? = null
     private var claimed = false
+    private var uasInterface: UsbUasInterface? = null
 
     private val interfaceScanner = UsbInterfaceScanner()
 
@@ -50,6 +53,11 @@ class UsbBlockDeviceReader(
     }
 
     override fun open(): Boolean {
+
+        Log.i(
+            "VolumeX",
+            "========== UsbBlockDeviceReader.open() =========="
+        )
         val usbConnection = usbManager.openDevice(device)
 
         if (usbConnection == null) {
@@ -61,13 +69,49 @@ class UsbBlockDeviceReader(
 
         interfaceScanner.inspectDevice(device)
 
-        val storageInterface =
-            interfaceScanner.findMassStorageInterface(device)
+        Log.i(
+            "VolumeX",
+            "About to inspect USB mass-storage interfaces for UAS"
+        )
+
+        val uasInterface = interfaceScanner.findUasInterface(device)
+
+        if (uasInterface != null) {
+            Log.i(
+                "VolumeX",
+                "UAS interface DETECTED: interface=${uasInterface.interfaceNumber}"
+            )
+
+        } else {
+
+            Log.i(
+                "VolumeX",
+                "UAS interface NOT detected"
+            )
+        }
+
+        val storageInterface = interfaceScanner.findMassStorageInterface(device)
 
         if (storageInterface == null) {
             Log.e(TAG, "Mass Storage interface not found")
             close()
             return false
+        }
+
+        if (uasInterface != null) {
+
+            Log.i(
+                "VolumeX",
+                "UAS interface detected at interface " +
+                        uasInterface.interfaceNumber
+            )
+
+        } else {
+
+            Log.i(
+                "VolumeX",
+                "No UAS interface detected"
+            )
         }
 
         massStorage = storageInterface
@@ -81,6 +125,33 @@ class UsbBlockDeviceReader(
             close()
             return false
         }
+
+        if (uasInterface != null) {
+
+            val claimed = usbConnection.claimInterface(
+                uasInterface!!.usbInterface,
+                true
+            )
+
+            Log.i(
+                "VolumeX",
+                "UAS interface claim result = $claimed"
+            )
+        }
+
+        val uasTransport = UsbUasTransport(
+            connection = usbConnection,
+            uasInterface = uasInterface!!
+        )
+
+        val uasExecutor = UasExecutor(uasTransport)
+
+        val uasReady = uasExecutor.testUnitReady()
+
+        Log.i(
+            "VolumeX",
+            "UAS TEST UNIT READY result = $uasReady"
+        )
 
         claimed = true
 
@@ -102,8 +173,6 @@ class UsbBlockDeviceReader(
 
         return readDiskLayout()
     }
-
-
 
     fun readExFatBootSector(
         partitionStartLba: Long,
@@ -140,9 +209,6 @@ class UsbBlockDeviceReader(
             partitionStartLba = partitionStartLba
         )
     }
-
-
-
 
     private fun runScsiChecks(): Boolean {
 
@@ -274,6 +340,14 @@ class UsbBlockDeviceReader(
             )
         }
 
+        // Now that LBA 0 has been read successfully, inspect the GPT header
+        // at LBA 1 and, if present, read the GPT partition-entry array.
+        readGptLayout(
+            executor = executor,
+            blockSize = capacity.blockSize
+        )
+
+
         if (partitions.isNotEmpty()) {
             //probeFilesystem(
             //    partitions[0].startLba,
@@ -341,12 +415,111 @@ class UsbBlockDeviceReader(
             }
         }
 
-
-
-
-
-
         return true
+    }
+
+
+    /**
+     * Reads the primary GPT header at LBA 1 and, when valid, reads the
+     * partition-entry array described by that header.
+     */
+    private fun readGptLayout(
+        executor: ScsiExecutor,
+        blockSize: Int
+    ) {
+        Log.i(TAG, "Reading GPT header at LBA 1")
+
+        val headerTransaction = executor.read10(
+            lba = 1,
+            blockCount = 1,
+            blockSize = blockSize
+        )
+
+        ScsiDebug.transaction(headerTransaction)
+
+        if (!headerTransaction.success) {
+            Log.i(TAG, "GPT header read failed")
+            return
+        }
+
+        val headerData = headerTransaction.data ?: run {
+            Log.i(TAG, "GPT header returned no data")
+            return
+        }
+
+        val gptHeader =
+            GptPartitionTable.parseHeader(headerData)
+                ?: run {
+                    Log.i(TAG, "GPT header signature not found")
+                    return
+                }
+
+        Log.i(TAG, "GPT detected")
+        Log.i(TAG, "GPT revision = 0x${gptHeader.revision.toString(16)}")
+        Log.i(TAG, "GPT header size = ${gptHeader.headerSize}")
+        Log.i(TAG, "GPT current LBA = ${gptHeader.currentLba}")
+        Log.i(TAG, "GPT backup LBA = ${gptHeader.backupLba}")
+        Log.i(TAG, "GPT first usable LBA = ${gptHeader.firstUsableLba}")
+        Log.i(TAG, "GPT last usable LBA = ${gptHeader.lastUsableLba}")
+        Log.i(TAG, "GPT partition entry LBA = ${gptHeader.partitionEntryLba}")
+        Log.i(TAG, "GPT partition entry count = ${gptHeader.partitionEntryCount}")
+        Log.i(TAG, "GPT partition entry size = ${gptHeader.partitionEntrySize}")
+
+        val entrySize = gptHeader.partitionEntrySize.toInt()
+        val entryCount = gptHeader.partitionEntryCount.toInt()
+
+        if (entrySize <= 0 || entryCount <= 0) {
+            Log.i(TAG, "GPT partition-entry information is invalid")
+            return
+        }
+
+        val totalEntryBytes = entrySize * entryCount
+        val blocksNeeded = (totalEntryBytes + blockSize - 1) / blockSize
+
+        Log.i(
+            TAG,
+            "Reading GPT partition entries at LBA ${gptHeader.partitionEntryLba}"
+        )
+        Log.i(
+            TAG,
+            "GPT partition table size = $totalEntryBytes bytes ($blocksNeeded blocks)"
+        )
+
+        val entryTransaction = executor.read10(
+            lba = gptHeader.partitionEntryLba,
+            blockCount = blocksNeeded,
+            blockSize = blockSize
+        )
+
+        ScsiDebug.transaction(entryTransaction)
+
+        if (!entryTransaction.success) {
+            Log.i(TAG, "GPT partition-entry read failed")
+            return
+        }
+
+        val entryData = entryTransaction.data ?: run {
+            Log.i(TAG, "GPT partition entries returned no data")
+            return
+        }
+
+        val gptPartitions = GptPartitionTable.parseEntries(
+            data = entryData,
+            header = gptHeader
+        )
+
+        Log.i(TAG, "GPT partitions found = ${gptPartitions.size}")
+
+        gptPartitions.forEach { partition ->
+            Log.i(
+                TAG,
+                "GPT Partition ${partition.index}: " +
+                        "type=${partition.typeGuid}, " +
+                        "start=${partition.startLba}, " +
+                        "end=${partition.endLba}, " +
+                        "name=${partition.name}"
+            )
+        }
     }
 
     private fun probeFilesystem(
