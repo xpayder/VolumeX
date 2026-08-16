@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Allow all USB mass storage devices -->
+    <usb-device class="8" /> <!-- USB Mass Storage Class -->
+    <usb-device subclass="6" /> <!-- SCSI subclass -->
+    <usb-device subclass="5" /> <!-- UAS subclass -->
+</resources>

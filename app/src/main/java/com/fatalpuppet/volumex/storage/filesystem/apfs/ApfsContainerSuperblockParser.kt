@@ -1,3 +1,4 @@
+// file: app/src/main/java/com/fatalpuppet/volumex/storage/filesystem/apfs/ApfsContainerSuperblockParser.kt
 package com.fatalpuppet.volumex.storage.filesystem.apfs
 
 import java.nio.ByteBuffer
@@ -6,49 +7,41 @@ import java.util.UUID
 
 object ApfsContainerSuperblockParser {
 
-    private const val APFS_MAGIC = 0x4253584E
+    private const val APFS_CONTAINER_SB_MAGIC = 0x4253464AL // "BSF4" in little endian
 
-    fun parse(
-        block: ByteArray
-    ): ApfsContainerSuperblock? {
+    fun parse(data: ByteArray): ApfsContainerSuperblock? {
+        if (data.size < 512) return null
 
-        if (block.size < 512) {
+        val buffer = ByteBuffer.wrap(data)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+
+        // Check magic number
+        val magic = buffer.int
+        // Fix: Compare Int with Int (convert magic constant to Int)
+        if (magic != APFS_CONTAINER_SB_MAGIC.toInt()) {
             return null
         }
 
-        val buffer =
-            ByteBuffer
-                .wrap(block)
-                .order(ByteOrder.LITTLE_ENDIAN)
+        // Skip some fields to get to the ones we need
+        buffer.position(0x20) // Skip to block size field
 
-        val magic =
-            buffer.getInt(32)
+        val blockSize = buffer.long
+        val blockCount = buffer.long
 
-        if (magic != APFS_MAGIC) {
-            return null
-        }
+        // Skip to UUID (at offset 0x50)
+        buffer.position(0x50)
+        val uuidMost = buffer.long
+        val uuidLeast = buffer.long
+        val containerUuid = UUID(uuidMost, uuidLeast).toString()
 
-        val blockSize =
-            buffer.getLong(36)
-                .let { it and 0xFFFFFFFFL }
+        // Skip to object IDs
+        buffer.position(0x88)
+        val nextObjectId = buffer.long
+        val nextTransactionId = buffer.long
 
-        val blockCount =
-            buffer.getLong(40)
-
-        val nextObjectId =
-            buffer.getLong(80)
-
-        val nextTransactionId =
-            buffer.getLong(88)
-
-        val containerUuid =
-            readUuid(
-                block,
-                72
-            )
-
-        val volumeCount =
-            buffer.getInt(116)
+        // Skip to volume count (at offset 0xE0)
+        buffer.position(0xE0)
+        val volumeCount = buffer.int
 
         return ApfsContainerSuperblock(
             blockSize = blockSize,
@@ -58,33 +51,5 @@ object ApfsContainerSuperblockParser {
             nextTransactionId = nextTransactionId,
             volumeCount = volumeCount
         )
-    }
-
-    private fun readUuid(
-        data: ByteArray,
-        offset: Int
-    ): String {
-
-        val bytes =
-            data.copyOfRange(
-                offset,
-                offset + 16
-            )
-
-        val buffer =
-            ByteBuffer
-                .wrap(bytes)
-                .order(ByteOrder.BIG_ENDIAN)
-
-        val mostSignificantBits =
-            buffer.long
-
-        val leastSignificantBits =
-            buffer.long
-
-        return UUID(
-            mostSignificantBits,
-            leastSignificantBits
-        ).toString()
     }
 }

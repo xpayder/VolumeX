@@ -4,19 +4,28 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.util.Log
+import android.content.Intent
+import android.app.PendingIntent
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.filesystem.FilesystemDetector
 import com.fatalpuppet.volumex.storage.filesystem.FilesystemType
+import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsBTree
+import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsVolumeSuperblockParser
 import com.fatalpuppet.volumex.storage.filesystem.partition.MbrPartitionTable
 import com.fatalpuppet.volumex.storage.scsi.ScsiCapacityResponseParser
-import com.fatalpuppet.volumex.storage.scsi.ScsiCommandFactory
 import com.fatalpuppet.volumex.storage.scsi.ScsiDebug
 import com.fatalpuppet.volumex.storage.scsi.ScsiExecutor
 import com.fatalpuppet.volumex.storage.scsi.ScsiInquiryResponseParser
 import com.fatalpuppet.volumex.storage.scsi.ScsiTransaction
 import com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatBootSector
 import com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatBootSectorParser
+import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsContainerSuperblockParser
+import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsFileEntry
 import com.fatalpuppet.volumex.storage.filesystem.partition.GptPartitionTable
+import com.fatalpuppet.volumex.storage.scsi.CommandBlockWrapper
+import com.fatalpuppet.volumex.storage.scsi.CommandTagGenerator
+import com.fatalpuppet.volumex.storage.scsi.ScsiCommand
+
 import com.fatalpuppet.volumex.storage.scsi.UasExecutor
 
 class UsbBlockDeviceReader(
@@ -26,6 +35,71 @@ class UsbBlockDeviceReader(
 
     companion object {
         private const val TAG = "VolumeX"
+    }
+
+    // Add this function to the UsbBlockDeviceReader class
+    // Replace the parseApfsFilesystem function with this corrected version
+    fun parseApfsFilesystem(containerStartLba: Long, blockSize: Int): List<ApfsFileEntry>? {
+        val executor = scsiExecutor ?: return null
+
+        // Read APFS container superblock (located at LBA = containerStartLba + 0x20)
+        val superblockLba = containerStartLba + 0x20
+        Log.i(TAG, "Reading APFS container superblock at LBA $superblockLba")
+
+        // Fix: Use readSector or the transaction properly
+        val transaction = executor.read10(
+            lba = superblockLba,
+            blockCount = 1,
+            blockSize = blockSize
+        )
+
+        if (!transaction.success || transaction.data == null) {
+            Log.e(TAG, "Failed to read APFS container superblock")
+            return null
+        }
+
+        val containerSb = ApfsContainerSuperblockParser.parse(transaction.data!!)
+        if (containerSb == null) {
+            Log.e(TAG, "Invalid APFS container superblock")
+            return null
+        }
+
+        Log.i(TAG, "APFS Container: ${containerSb.containerUuid}")
+        Log.i(TAG, "Block size: ${containerSb.blockSize}")
+        Log.i(TAG, "Volume count: ${containerSb.volumeCount}")
+
+        // For now, we'll read the first volume
+        // In a real implementation, you'd walk the volume list
+        val volumeLba = containerStartLba + 0x40 // Simplified volume location
+        val volumeTransaction = executor.read10(
+            lba = volumeLba,
+            blockCount = 1,
+            blockSize = blockSize
+        )
+
+        if (!volumeTransaction.success || volumeTransaction.data == null) {
+            Log.e(TAG, "Failed to read APFS volume")
+            return null
+        }
+
+        val volumeSb = ApfsVolumeSuperblockParser.parse(volumeTransaction.data!!)
+        if (volumeSb == null) {
+            Log.e(TAG, "Invalid APFS volume superblock")
+            return null
+        }
+
+        Log.i(TAG, "APFS Volume: ${volumeSb.volumeName}")
+        Log.i(TAG, "Root directory object ID: ${volumeSb.rootDirectoryObjectId}")
+
+        // Walk the B-Tree
+        val btree = ApfsBTree(
+            reader = this,
+            containerStartLba = containerStartLba,
+            blockSize = containerSb.blockSize,
+            rootObjectId = volumeSb.rootDirectoryObjectId
+        )
+
+        return btree.walkTree()
     }
 
     private var connection: UsbDeviceConnection? = null
@@ -51,13 +125,9 @@ class UsbBlockDeviceReader(
             endpointOut = storage.bulkOut.address
         )
     }
-
+    // Alternative: Try UAS first, fall back to BOT
     override fun open(): Boolean {
-
-        Log.i(
-            "VolumeX",
-            "========== UsbBlockDeviceReader.open() =========="
-        )
+        Log.i(TAG, "========== UsbBlockDeviceReader.open() ==========")
         val usbConnection = usbManager.openDevice(device)
 
         if (usbConnection == null) {
@@ -66,29 +136,7 @@ class UsbBlockDeviceReader(
         }
 
         connection = usbConnection
-
         interfaceScanner.inspectDevice(device)
-
-        Log.i(
-            "VolumeX",
-            "About to inspect USB mass-storage interfaces for UAS"
-        )
-
-        val uasInterface = interfaceScanner.findUasInterface(device)
-
-        if (uasInterface != null) {
-            Log.i(
-                "VolumeX",
-                "UAS interface DETECTED: interface=${uasInterface.interfaceNumber}"
-            )
-
-        } else {
-
-            Log.i(
-                "VolumeX",
-                "UAS interface NOT detected"
-            )
-        }
 
         val storageInterface = interfaceScanner.findMassStorageInterface(device)
 
@@ -98,76 +146,68 @@ class UsbBlockDeviceReader(
             return false
         }
 
-        if (uasInterface != null) {
-
-            Log.i(
-                "VolumeX",
-                "UAS interface detected at interface " +
-                        uasInterface.interfaceNumber
-            )
-
-        } else {
-
-            Log.i(
-                "VolumeX",
-                "No UAS interface detected"
-            )
-        }
-
-        massStorage = storageInterface
-
-        if (!usbConnection.claimInterface(
-                storageInterface.usbInterface,
-                true
-            )
-        ) {
-            Log.e(TAG, "Unable to claim USB Mass Storage interface")
-            close()
-            return false
-        }
+        // Try UAS first
+        val uasInterface = interfaceScanner.findUasInterface(device)
+        var useUas = false
 
         if (uasInterface != null) {
+            Log.i(TAG, "UAS interface detected, attempting UAS...")
 
-            val claimed = usbConnection.claimInterface(
-                uasInterface!!.usbInterface,
-                true
-            )
+            // Try to claim UAS interface
+            if (usbConnection.claimInterface(uasInterface.usbInterface, true)) {
+                Log.i(TAG, "UAS interface claimed successfully")
 
-            Log.i(
-                "VolumeX",
-                "UAS interface claim result = $claimed"
-            )
+                // Try UAS transport
+                try {
+                    val uasTransport = UsbUasTransport(
+                        connection = usbConnection,
+                        uasInterface = uasInterface
+                    )
+                    val uasExecutor = UasExecutor(uasTransport)
+                    val uasReady = uasExecutor.testUnitReady()
+
+                    if (uasReady) {
+                        Log.i(TAG, "UAS TEST UNIT READY successful!")
+                        useUas = true
+                        // Set up UAS transport
+                        // Note: You'll need to implement UAS support in ScsiExecutor
+                    } else {
+                        Log.w(TAG, "UAS TEST UNIT READY failed, falling back to BOT")
+                        usbConnection.releaseInterface(uasInterface.usbInterface)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "UAS initialization failed: ${e.message}")
+                    usbConnection.releaseInterface(uasInterface.usbInterface)
+                }
+            }
         }
 
-        val uasTransport = UsbUasTransport(
-            connection = usbConnection,
-            uasInterface = uasInterface!!
-        )
+        // Fall back to BOT if UAS failed
+        if (!useUas) {
+            Log.i(TAG, "Using Bulk-Only Transport (BOT)")
 
-        val uasExecutor = UasExecutor(uasTransport)
+            if (!usbConnection.claimInterface(storageInterface.usbInterface, true)) {
+                Log.e(TAG, "Unable to claim USB Mass Storage interface")
+                close()
+                return false
+            }
 
-        val uasReady = uasExecutor.testUnitReady()
-
-        Log.i(
-            "VolumeX",
-            "UAS TEST UNIT READY result = $uasReady"
-        )
+            transport = BulkUsbTransport(
+                connection = usbConnection,
+                bulkIn = storageInterface.bulkIn,
+                bulkOut = storageInterface.bulkOut
+            )
+        }
 
         claimed = true
-
-        transport = BulkUsbTransport(
-            connection = usbConnection,
-            bulkIn = storageInterface.bulkIn,
-            bulkOut = storageInterface.bulkOut
-        )
-
         connectionInfo = getConnectionInfo()
 
-        scsiExecutor = ScsiExecutor(
-            BulkOnlyTransport(transport!!)
-        )
+        // Initialize SCSI executor with BOT
+        scsiExecutor = ScsiExecutor(BulkOnlyTransport(transport!!))
 
         if (!runScsiChecks()) {
+            Log.e(TAG, "SCSI checks failed")
+            close()
             return false
         }
 
@@ -210,19 +250,27 @@ class UsbBlockDeviceReader(
         )
     }
 
+    // In UsbBlockDeviceReader.kt, update runScsiChecks():
     private fun runScsiChecks(): Boolean {
-
-        val executor =
-            scsiExecutor
-                ?: run {
-                    Log.e(TAG, "SCSI executor unavailable")
-                    return false
-                }
+        val executor = scsiExecutor ?: run {
+            Log.e(TAG, "SCSI executor unavailable")
+            return false
+        }
 
         // TEST UNIT READY
+        val testCommand = ScsiCommand.testUnitReady()
+        val readyCbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = 0,
+            flags = 0x00.toByte(),
+            lun = 0,
+            commandLength = testCommand.size.toByte(),
+            command = testCommand
+        )
+
         val ready = executor.execute(
             "TEST UNIT READY",
-            ScsiCommandFactory.testUnitReady(),
+            readyCbw,
             0
         )
 
@@ -235,18 +283,15 @@ class UsbBlockDeviceReader(
 
         // INQUIRY
         val inquiry = executor.inquiry()
-
         ScsiDebug.transaction(inquiry)
 
         inquiry.data?.let { data ->
             ScsiInquiryResponseParser.parse(data)?.let { response ->
-
                 Log.i(
                     TAG,
                     "SCSI device: ${response.vendor} ${response.product} " +
                             "${response.revision}"
                 )
-
                 Log.i(
                     TAG,
                     "Removable=${response.removable}, " +
@@ -417,18 +462,14 @@ class UsbBlockDeviceReader(
 
         return true
     }
-
-
-    /**
-     * Reads the primary GPT header at LBA 1 and, when valid, reads the
-     * partition-entry array described by that header.
-     */
+    // Replace the entire readGptLayout function
     private fun readGptLayout(
         executor: ScsiExecutor,
         blockSize: Int
     ) {
         Log.i(TAG, "Reading GPT header at LBA 1")
 
+        // Read GPT header at LBA 1
         val headerTransaction = executor.read10(
             lba = 1,
             blockCount = 1,
@@ -447,12 +488,10 @@ class UsbBlockDeviceReader(
             return
         }
 
-        val gptHeader =
-            GptPartitionTable.parseHeader(headerData)
-                ?: run {
-                    Log.i(TAG, "GPT header signature not found")
-                    return
-                }
+        val gptHeader = GptPartitionTable.parseHeader(headerData) ?: run {
+            Log.i(TAG, "GPT header signature not found")
+            return
+        }
 
         Log.i(TAG, "GPT detected")
         Log.i(TAG, "GPT revision = 0x${gptHeader.revision.toString(16)}")
@@ -510,7 +549,8 @@ class UsbBlockDeviceReader(
 
         Log.i(TAG, "GPT partitions found = ${gptPartitions.size}")
 
-        gptPartitions.forEach { partition ->
+        // Use a regular for loop instead of forEach to avoid type inference issues
+        for (partition in gptPartitions) {
             Log.i(
                 TAG,
                 "GPT Partition ${partition.index}: " +
@@ -519,6 +559,21 @@ class UsbBlockDeviceReader(
                         "end=${partition.endLba}, " +
                         "name=${partition.name}"
             )
+
+            // APFS partition type GUID: 7C3457EF-0000-11AA-AA11-00306543ECAC
+            if (partition.typeGuid.equals("7C3457EF-0000-11AA-AA11-00306543ECAC", ignoreCase = true)) {
+                Log.i(TAG, "APFS partition detected!")
+                Log.i(TAG, "APFS partition starts at LBA ${partition.startLba}")
+
+                // Parse APFS filesystem
+                val files = parseApfsFilesystem(partition.startLba, blockSize)
+                if (files != null && files.isNotEmpty()) {
+                    Log.i(TAG, "Found ${files.size} files/directories in APFS volume")
+                    for (file in files) {
+                        Log.i(TAG, "  ${if (file.isDirectory) "[DIR]" else "[FILE]"} ${file.name} (${file.fileSize} bytes)")
+                    }
+                }
+            }
         }
     }
 
@@ -642,22 +697,31 @@ class UsbBlockDeviceReader(
             blockSize = sectorSize()
         ).data
     }
-
     override fun sectorSize(): Int = 512
 
+
+    // Also update testUnitReady():
     fun testUnitReady(): ScsiTransaction {
-        val executor =
-            scsiExecutor
-                ?: return ScsiTransaction(
-                    "TEST UNIT READY",
-                    false,
-                    0,
-                    "Transport unavailable"
-                )
+        val executor = scsiExecutor ?: return ScsiTransaction(
+            "TEST UNIT READY",
+            false,
+            0,
+            "Transport unavailable"
+        )
+
+        val testCommand = ScsiCommand.testUnitReady()
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = 0,
+            flags = 0x00.toByte(),
+            lun = 0,
+            commandLength = testCommand.size.toByte(),
+            command = testCommand
+        )
 
         return executor.execute(
             "TEST UNIT READY",
-            ScsiCommandFactory.testUnitReady(),
+            cbw,
             0
         )
     }

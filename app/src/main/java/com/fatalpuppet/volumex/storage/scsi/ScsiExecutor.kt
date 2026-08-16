@@ -1,6 +1,8 @@
+// file: app/src/main/java/com/fatalpuppet/volumex/storage/scsi/ScsiExecutor.kt
 package com.fatalpuppet.volumex.storage.scsi
 
 import com.fatalpuppet.volumex.storage.usb.BulkOnlyTransport
+import android.util.Log
 
 class ScsiExecutor(
     private val transport: BulkOnlyTransport
@@ -12,10 +14,9 @@ class ScsiExecutor(
     ): ScsiTransaction {
         val (result, elapsed) =
             TransactionTimer.measure {
-                transport.execute(
-                    CommandBlockWrapperBuilder.build(cbw),
-                    expectedLength
-                )
+                // Build the CBW byte array and execute
+                val cbwBytes = CommandBlockWrapperBuilder.build(cbw)
+                transport.execute(cbwBytes, expectedLength)
             }
         return ScsiTransaction(
             command = name,
@@ -25,14 +26,16 @@ class ScsiExecutor(
             data = result.data
         )
     }
+
     fun inquiry(): ScsiTransaction {
+        val command = ScsiInquiry.command()
         val cbw = CommandBlockWrapper(
             tag = CommandTagGenerator.next(),
             dataTransferLength = 36,
             flags = 0x80.toByte(),
             lun = 0,
-            commandLength = 6,
-            command = ScsiInquiry.command()
+            commandLength = command.size.toByte(),
+            command = command
         )
 
         return execute(
@@ -43,13 +46,14 @@ class ScsiExecutor(
     }
 
     fun readCapacity(): ScsiTransaction {
+        val command = ScsiReadCapacity.command()
         val cbw = CommandBlockWrapper(
             tag = CommandTagGenerator.next(),
             dataTransferLength = 8,
             flags = 0x80.toByte(),
             lun = 0,
-            commandLength = 10,
-            command = ScsiReadCapacity.command()
+            commandLength = command.size.toByte(),
+            command = command
         )
 
         return execute(
@@ -59,28 +63,23 @@ class ScsiExecutor(
         )
     }
 
-
-    fun read10(
-        lba: Long,
-        blockCount: Int,
-        blockSize: Int
-    ): ScsiTransaction {
-
+    fun read10(lba: Long, blockCount: Int, blockSize: Int): ScsiTransaction {
         val transferLength = blockCount * blockSize
+        val command = ScsiRead10.command(
+            lba = lba,
+            transferLength = blockCount
+        )
 
         val cbw = CommandBlockWrapper(
             tag = CommandTagGenerator.next(),
             dataTransferLength = transferLength,
             flags = 0x80.toByte(),
             lun = 0,
-            commandLength = 10,
-            command = ScsiRead10.command(
-                lba = lba,
-                transferLength = blockCount
-            )
+            commandLength = command.size.toByte(),
+            command = command
         )
 
-        android.util.Log.d(
+        Log.d(
             "VolumeX",
             "READ(10) CDB = ${
                 cbw.command.joinToString(" ") {
@@ -89,7 +88,7 @@ class ScsiExecutor(
             }"
         )
 
-        android.util.Log.d(
+        Log.d(
             "VolumeX",
             "READ(10) CBW tag=${cbw.tag} " +
                     "transferLength=${cbw.dataTransferLength} " +
@@ -103,7 +102,4 @@ class ScsiExecutor(
             expectedLength = transferLength
         )
     }
-
-
-
 }

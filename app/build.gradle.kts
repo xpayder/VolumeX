@@ -5,11 +5,7 @@ plugins {
 
 android {
     namespace = "com.fatalpuppet.volumex"
-    compileSdk {
-        version = release(37) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.fatalpuppet.volumex"
