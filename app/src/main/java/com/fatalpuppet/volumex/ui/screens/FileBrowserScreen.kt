@@ -214,9 +214,7 @@ private fun FileBrowserTopBar(
                         Icons.Default.ChevronRight,
                         null,
                         tint = TextTertiary,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .align(Alignment.CenterVertically)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }

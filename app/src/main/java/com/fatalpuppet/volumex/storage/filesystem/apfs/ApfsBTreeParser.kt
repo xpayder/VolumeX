@@ -128,14 +128,17 @@ class ApfsBTreeParser(
         val node = ApfsBTreeNode.parse(data) ?: return
 
         if (!node.isLeaf) {
-            // Internal node: recurse into children
+            // Internal node: recurse into children.
+            // Value offsets are from end of block going backwards (variable KV).
             for (i in 0 until node.nkeys) {
                 val toc = node.getVariableTocEntry(i)
-                val vOff = node.keyOffset(toc.vOff)
-                if (vOff + 8 > data.size) continue
+                val vOff = data.size - toc.vOff  // value offset from end of block
+                if (vOff < 0 || vOff + 8 > data.size) continue
                 val vBuf = ByteBuffer.wrap(data, vOff, 8).order(ByteOrder.LITTLE_ENDIAN)
                 val childAddr = vBuf.getLong()
-                collectFsRecords(childAddr, inodes, dirEntries, extents, depth + 1)
+                if (childAddr > 0) {
+                    collectFsRecords(childAddr, inodes, dirEntries, extents, depth + 1)
+                }
             }
             return
         }
