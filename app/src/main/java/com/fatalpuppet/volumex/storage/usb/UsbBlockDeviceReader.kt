@@ -64,7 +64,7 @@ class UsbBlockDeviceReader(
             return null
         }
 
-        Log.i(TAG, "APFS Container: ${containerSb.containerUuid}")
+        Log.i(TAG, "APFS Container: ${containerSb.containerUuidString}")
         Log.i(TAG, "Block size: ${containerSb.blockSize}")
         Log.i(TAG, "Volume count: ${containerSb.volumeCount}")
 
