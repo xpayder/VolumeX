@@ -47,7 +47,8 @@ import com.fatalpuppet.volumex.ui.viewmodel.ViewMode
 fun FileBrowserScreen(
     viewModel: FileBrowserViewModel,
     onNavigateBack: () -> Unit = {},
-    onOpenPreview: ((FileSystemEntry) -> Unit)? = null
+    onOpenPreview: ((FileSystemEntry) -> Unit)? = null,
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val entries by viewModel.entries.collectAsState()
@@ -98,6 +99,7 @@ fun FileBrowserScreen(
                 onToggleViewMode = { viewModel.toggleViewMode() },
                 onToggleHidden = { viewModel.toggleHidden() },
                 onSearchClick = { searchActive = !searchActive; if (!searchActive) viewModel.search("") },
+                onSettingsClick = onOpenSettings,
                 sortBy = sortBy
             )
 
@@ -447,6 +449,7 @@ private fun FileBrowserTopBar(
     onToggleViewMode: () -> Unit,
     onToggleHidden: () -> Unit,
     onSearchClick: () -> Unit,
+    onSettingsClick: () -> Unit = {},
     sortBy: SortBy
 ) {
     Column(
@@ -498,6 +501,9 @@ private fun FileBrowserTopBar(
                 }
                 IconButton(onClick = onShowSortMenu) {
                     Icon(Icons.Default.Sort, "Sort", tint = TextSecondary)
+                }
+                IconButton(onClick = onSettingsClick) {
+                    Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
                 }
             }
         }

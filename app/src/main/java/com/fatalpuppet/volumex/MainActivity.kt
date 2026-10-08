@@ -22,6 +22,7 @@ import com.fatalpuppet.volumex.ui.screens.FileBrowserScreen
 import com.fatalpuppet.volumex.ui.screens.FilePreviewScreen
 import com.fatalpuppet.volumex.ui.screens.FileVaultUnlockScreen
 import com.fatalpuppet.volumex.ui.screens.HomeScreen
+import com.fatalpuppet.volumex.ui.screens.SettingsScreen
 import com.fatalpuppet.volumex.ui.screens.TransferScreen
 import com.fatalpuppet.volumex.ui.screens.VolumePickerScreen
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
@@ -40,6 +41,7 @@ sealed class Screen {
     data class FileBrowser(val volumeIndex: Int) : Screen()
     object Transfers : Screen()
     data class FilePreview(val entry: FileSystemEntry) : Screen()
+    object Settings : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -114,13 +116,22 @@ class MainActivity : ComponentActivity() {
                         FileBrowserScreen(
                             viewModel = fileBrowserViewModel,
                             onNavigateBack = { currentScreen = Screen.Home },
-                            onOpenPreview = { entry -> currentScreen = Screen.FilePreview(entry) }
+                            onOpenPreview = { entry -> currentScreen = Screen.FilePreview(entry) },
+                            onOpenSettings = { currentScreen = Screen.Settings }
                         )
                     }
                     is Screen.FilePreview -> {
                         val previewEntry = (screen as Screen.FilePreview).entry
                         FilePreviewScreen(
                             entry = previewEntry,
+                            onNavigateBack = { currentScreen = Screen.FileBrowser(0) }
+                        )
+                    }
+                    is Screen.Settings -> {
+                        val showHidden by fileBrowserViewModel.showHidden.collectAsState()
+                        SettingsScreen(
+                            showHiddenFiles = showHidden,
+                            onToggleHiddenFiles = { fileBrowserViewModel.toggleHidden() },
                             onNavigateBack = { currentScreen = Screen.FileBrowser(0) }
                         )
                     }
