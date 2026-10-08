@@ -13,6 +13,32 @@ interface FileSystemReader {
     /** Read the full content of a file entry into a ByteArray. */
     fun readFile(entry: FileSystemEntry): ByteArray?
 
+    /**
+     * Recursively search for files whose name contains [query] (case-insensitive).
+     * Default implementation does a depth-limited scan from root.
+     */
+    fun searchFiles(query: String, volumeIndex: Int = 0): List<FileSystemEntry> {
+        val results = mutableListOf<FileSystemEntry>()
+        searchRecursive(volumeIndex, "/", query.lowercase(), results, 0, 10)
+        return results
+    }
+
     /** Release resources. */
     fun unmount()
+}
+
+private fun FileSystemReader.searchRecursive(
+    volumeIndex: Int,
+    path: String,
+    query: String,
+    results: MutableList<FileSystemEntry>,
+    depth: Int,
+    maxDepth: Int
+) {
+    if (depth > maxDepth) return
+    val entries = try { listDirectory(volumeIndex, path) } catch (e: Exception) { return }
+    for (entry in entries) {
+        if (entry.name.lowercase().contains(query)) results.add(entry)
+        if (entry.isDirectory) searchRecursive(volumeIndex, entry.path, query, results, depth + 1, maxDepth)
+    }
 }

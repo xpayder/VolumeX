@@ -9,6 +9,8 @@
 
     <uses-permission android:name="android.permission.USB_PERMISSION" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Storage permissions for file extraction to Downloads -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -50,5 +52,31 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/usb_device_filter" />
         </activity>
+
+        <!-- DriveFileProvider: serves file bytes from USB drive to other apps -->
+        <provider
+            android:name=".provider.DriveFileProvider"
+            android:authorities="${applicationId}.drivefile"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <!-- DriveDocumentsProvider: exposes drive in Android file picker -->
+        <provider
+            android:name=".provider.DriveDocumentsProvider"
+            android:authorities="${applicationId}.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
+        <!-- TransferService: runs file copies in foreground -->
+        <service
+            android:name=".services.TransferService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
     </application>
 </manifest>

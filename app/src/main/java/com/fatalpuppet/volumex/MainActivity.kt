@@ -19,8 +19,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
 import com.fatalpuppet.volumex.ui.screens.FileBrowserScreen
+import com.fatalpuppet.volumex.ui.screens.FilePreviewScreen
+import com.fatalpuppet.volumex.ui.screens.FileVaultUnlockScreen
 import com.fatalpuppet.volumex.ui.screens.HomeScreen
 import com.fatalpuppet.volumex.ui.screens.TransferScreen
+import com.fatalpuppet.volumex.ui.screens.VolumePickerScreen
+import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
 import com.fatalpuppet.volumex.ui.theme.VolumeXTheme
 import com.fatalpuppet.volumex.ui.viewmodel.FileBrowserViewModel
 import com.fatalpuppet.volumex.ui.viewmodel.MainViewModel
@@ -32,8 +36,10 @@ import kotlinx.coroutines.launch
  */
 sealed class Screen {
     object Home : Screen()
+    object VolumePicker : Screen()
     data class FileBrowser(val volumeIndex: Int) : Screen()
     object Transfers : Screen()
+    data class FilePreview(val entry: FileSystemEntry) : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -79,16 +85,43 @@ class MainActivity : ComponentActivity() {
                             onBrowseVolume = { volumeInfo, idx ->
                                 val state = mainViewModel.deviceState.value
                                 if (state is com.fatalpuppet.volumex.ui.viewmodel.DeviceState.Connected) {
-                                    fileBrowserViewModel.setReader(state.reader, idx)
+                                    // If multiple volumes, show picker
+                                    if (state.volumes.size > 1) {
+                                        currentScreen = Screen.VolumePicker
+                                    } else {
+                                        fileBrowserViewModel.setReader(state.reader, idx)
+                                        currentScreen = Screen.FileBrowser(idx)
+                                    }
                                 }
-                                currentScreen = Screen.FileBrowser(idx)
                             }
                         )
+                    }
+                    is Screen.VolumePicker -> {
+                        val state = mainViewModel.deviceState.value
+                        if (state is com.fatalpuppet.volumex.ui.viewmodel.DeviceState.Connected) {
+                            VolumePickerScreen(
+                                volumes = state.volumes,
+                                deviceName = state.deviceName,
+                                onSelectVolume = { _, idx ->
+                                    fileBrowserViewModel.setReader(state.reader, idx)
+                                    currentScreen = Screen.FileBrowser(idx)
+                                },
+                                onNavigateBack = { currentScreen = Screen.Home }
+                            )
+                        }
                     }
                     is Screen.FileBrowser -> {
                         FileBrowserScreen(
                             viewModel = fileBrowserViewModel,
-                            onNavigateBack = { currentScreen = Screen.Home }
+                            onNavigateBack = { currentScreen = Screen.Home },
+                            onOpenPreview = { entry -> currentScreen = Screen.FilePreview(entry) }
+                        )
+                    }
+                    is Screen.FilePreview -> {
+                        val previewEntry = (screen as Screen.FilePreview).entry
+                        FilePreviewScreen(
+                            entry = previewEntry,
+                            onNavigateBack = { currentScreen = Screen.FileBrowser(0) }
                         )
                     }
                     is Screen.Transfers -> {

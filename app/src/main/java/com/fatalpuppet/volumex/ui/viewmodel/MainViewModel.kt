@@ -6,10 +6,13 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fatalpuppet.volumex.storage.ActiveDriveSession
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemReader
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
 import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsReader
+import com.fatalpuppet.volumex.storage.filesystem.fat32.Fat32Reader
+import com.fatalpuppet.volumex.storage.filesystem.ext.ExtReader
 import com.fatalpuppet.volumex.storage.filesystem.hfsplus.HfsPlusReader
 import com.fatalpuppet.volumex.storage.usb.UsbBlockDeviceReader
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +73,9 @@ class MainViewModel : ViewModel() {
                     }
 
                     val volumes = fsReader.getVolumeInfos()
+                    // Update the global session singleton so providers can access it
+                    ActiveDriveSession.reader = fsReader
+                    ActiveDriveSession.volumes = volumes
                     _deviceState.value = DeviceState.Connected(
                         deviceName = device.productName ?: "USB Drive",
                         volumes = volumes,
@@ -107,6 +113,20 @@ class MainViewModel : ViewModel() {
                     Log.i(TAG, "HFS+ filesystem found at partition LBA $lba")
                     return@withContext hfsReader
                 }
+
+                // Try FAT32
+                val fatReader = Fat32Reader(reader, lba)
+                if (fatReader.mount()) {
+                    Log.i(TAG, "FAT32 filesystem found at partition LBA $lba")
+                    return@withContext fatReader
+                }
+
+                // Try ext2/3/4
+                val extReader = ExtReader(reader, lba)
+                if (extReader.mount()) {
+                    Log.i(TAG, "ext filesystem found at partition LBA $lba")
+                    return@withContext extReader
+                }
             }
             null
         }
@@ -116,6 +136,7 @@ class MainViewModel : ViewModel() {
         activeReader?.close()
         activeReader = null
         (_deviceState.value as? DeviceState.Connected)?.reader?.unmount()
+        ActiveDriveSession.clear()
         _deviceState.value = DeviceState.Disconnected
         _statusMessage.value = "Disconnected"
     }

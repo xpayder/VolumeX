@@ -111,6 +111,28 @@ class HfsPlusReader(
         return parser.readFileFork(fork)
     }
 
+    override fun searchFiles(query: String, volumeIndex: Int): List<FileSystemEntry> {
+        if (allEntries.isEmpty()) {
+            val parser = btreeParser ?: return emptyList()
+            allEntries = parser.scanAllEntries()
+        }
+        val lq = query.lowercase()
+        return allEntries
+            .filter { it.name.lowercase().contains(lq) && !it.isDirectory }
+            .map { entry ->
+                FileSystemEntry(
+                    name = entry.name,
+                    path = "/${entry.name}",
+                    isDirectory = entry.isDirectory,
+                    size = entry.fileSize,
+                    createdAt = hfsTimestampToMs(entry.createDate),
+                    modifiedAt = hfsTimestampToMs(entry.modifyDate),
+                    hfsCatalogId = entry.catalogId,
+                    hfsParentId = entry.parentId
+                )
+            }
+    }
+
     override fun unmount() {
         volumeHeader = null
         btreeParser = null

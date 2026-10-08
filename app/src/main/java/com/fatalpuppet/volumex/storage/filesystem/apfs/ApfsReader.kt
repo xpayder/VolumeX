@@ -151,6 +151,39 @@ class ApfsReader(
         return if (written > 0) result.copyOf(written) else ByteArray(0)
     }
 
+    override fun searchFiles(query: String, volumeIndex: Int): List<FileSystemEntry> {
+        val sb = containerSb ?: return emptyList()
+        val btree = ApfsBTreeParser(reader, partitionStartLba, sb.blockSize)
+        val omapData = btree.readBlock(sb.omapOid) ?: return emptyList()
+        val containerOmap = ApfsOMapParser.parse(omapData) ?: return emptyList()
+        val volOids = sb.fsOids.filter { it != 0L }
+        if (volumeIndex >= volOids.size) return emptyList()
+        val volOid = volOids[volumeIndex]
+        val volPaddr = btree.omapLookup(containerOmap.treeOid, volOid) ?: return emptyList()
+        val volData = btree.readBlock(volPaddr) ?: return emptyList()
+        val volSb = ApfsVolumeSuperblockParser.parse(volData) ?: return emptyList()
+        val volOmapData = btree.readBlock(volSb.omapOid) ?: return emptyList()
+        val volOmap = ApfsOMapParser.parse(volOmapData) ?: return emptyList()
+        val fsRootPaddr = btree.omapLookup(volOmap.treeOid, volSb.rootTreeOid) ?: return emptyList()
+        val fsResults = btree.scanFsTree(fsRootPaddr)
+        val lq = query.lowercase()
+        return fsResults
+            .filter { it.name.lowercase().contains(lq) && !it.inode.isDirectory }
+            .map { result ->
+                FileSystemEntry(
+                    name = result.name,
+                    path = "/${result.name}",
+                    isDirectory = result.inode.isDirectory,
+                    size = result.inode.uncompressedSize,
+                    createdAt = result.inode.createTimeMs,
+                    modifiedAt = result.inode.modTimeMs,
+                    inodeOid = result.oid,
+                    parentOid = result.parentOid,
+                    extents = result.extents
+                )
+            }
+    }
+
     override fun unmount() {
         containerSb = null
     }

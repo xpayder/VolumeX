@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 
 data class BreadcrumbItem(val name: String, val path: String)
 
+enum class ViewMode { LIST, GRID }
+
 class FileBrowserViewModel : ViewModel() {
     companion object {
         private const val TAG = "VolumeX"
@@ -49,6 +51,24 @@ class FileBrowserViewModel : ViewModel() {
     // Sort state
     private val _sortBy = MutableStateFlow(SortBy.NAME)
     val sortBy: StateFlow<SortBy> = _sortBy.asStateFlow()
+
+    // View mode (list / grid)
+    private val _viewMode = MutableStateFlow(ViewMode.LIST)
+    val viewMode: StateFlow<ViewMode> = _viewMode.asStateFlow()
+
+    // Hidden files toggle
+    private val _showHidden = MutableStateFlow(false)
+    val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
+
+    // Search
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<FileSystemEntry>>(emptyList())
+    val searchResults: StateFlow<List<FileSystemEntry>> = _searchResults.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
     fun setReader(fsReader: FileSystemReader, volumeIndex: Int = 0) {
         reader = fsReader
@@ -87,6 +107,60 @@ class FileBrowserViewModel : ViewModel() {
     fun setSortBy(sort: SortBy) {
         _sortBy.value = sort
         _entries.value = sortEntries(_entries.value, sort)
+    }
+
+    fun toggleViewMode() {
+        _viewMode.value = if (_viewMode.value == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
+    }
+
+    fun toggleHidden() {
+        _showHidden.value = !_showHidden.value
+        loadDirectory(currentPath)
+    }
+
+    fun search(query: String) {
+        _searchQuery.value = query
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            _isSearching.value = false
+            return
+        }
+        _isSearching.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val results = try {
+                reader?.searchFiles(query, currentVolumeIndex) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Search error", e)
+                emptyList()
+            }
+            _searchResults.value = results
+            _isSearching.value = false
+        }
+    }
+
+    fun getFolderDetails(entry: FileSystemEntry) {
+        if (!entry.isDirectory) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val (count, total) = computeFolderDetails(entry.path, depth = 0, maxDepth = 5)
+            val updatedEntries = _entries.value.map {
+                if (it.path == entry.path) it.copy(childCount = count, totalSize = total) else it
+            }
+            _entries.value = updatedEntries
+        }
+    }
+
+    private fun computeFolderDetails(path: String, depth: Int, maxDepth: Int): Pair<Int, Long> {
+        if (depth > maxDepth) return Pair(0, 0L)
+        val fsReader = reader ?: return Pair(0, 0L)
+        val children = try { fsReader.listDirectory(currentVolumeIndex, path) } catch (e: Exception) { return Pair(0, 0L) }
+        var count = children.size
+        var total = children.filter { !it.isDirectory }.sumOf { it.size }
+        for (child in children.filter { it.isDirectory }) {
+            val (c, s) = computeFolderDetails(child.path, depth + 1, maxDepth)
+            count += c
+            total += s
+        }
+        return Pair(count, total)
     }
 
     fun copySelectedToAndroid(context: Context) {
@@ -143,8 +217,9 @@ class FileBrowserViewModel : ViewModel() {
             }
 
             if (result != null) {
-                _entries.value = sortEntries(result, _sortBy.value)
-                _statusMessage.value = "${result.size} item${if (result.size != 1) "s" else ""}"
+                val filtered = if (_showHidden.value) result else result.filter { !it.name.startsWith(".") }
+                _entries.value = sortEntries(filtered, _sortBy.value)
+                _statusMessage.value = "${filtered.size} item${if (filtered.size != 1) "s" else ""}"
             } else {
                 _entries.value = emptyList()
                 _statusMessage.value = "Error loading directory"
