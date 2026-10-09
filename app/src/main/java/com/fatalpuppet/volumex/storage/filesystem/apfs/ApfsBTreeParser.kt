@@ -6,13 +6,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Parses APFS B-Trees.
+ * Parses APFS B-trees.
  *
- * For OMAP trees (fixed K/V, 16-byte keys and 16-byte values):
- *   - Lookup by (oid, xid) -> physical block address
- *
- * For FS trees (variable K/V):
- *   - Scan for INODE, DIR_REC, FILE_EXTENT records
+ * OMAP trees (physical, fixed K/V: key = omap_key_t{oid,xid}, value = omap_val_t{flags,size,paddr}).
+ * FS trees (virtual, variable K/V): INODE, DIR_REC and FILE_EXTENT records. Child pointers in
+ * FS-tree interior nodes are *virtual* OIDs that must be resolved through the volume's OMAP.
  */
 class ApfsBTreeParser(
     private val reader: BlockDeviceReader,
@@ -21,13 +19,14 @@ class ApfsBTreeParser(
 ) {
     companion object {
         private const val TAG = "VolumeX"
-        private const val MAX_DEPTH = 10
+        private const val MAX_DEPTH = 16
     }
 
     private val sectorsPerBlock: Long get() = blockSize / reader.sectorSize()
 
-    /** Read one APFS block (blockSize bytes) starting at physical block address `blockAddr` */
+    /** Read one APFS block (blockSize bytes) at physical block address [blockAddr]. */
     fun readBlock(blockAddr: Long): ByteArray? {
+        if (blockAddr < 0) return null
         val lba = partitionStartLba + blockAddr * sectorsPerBlock
         val result = ByteArray(blockSize.toInt())
         val sectorSize = reader.sectorSize()
@@ -39,22 +38,21 @@ class ApfsBTreeParser(
     }
 
     /**
-     * Look up an OID in an OMAP B-Tree (physical tree, fixed K/V).
-     * Returns the physical block address of the object, or null if not found.
+     * Look up [targetOid] in an OMAP B-tree whose root is at physical block [omapTreeRootAddr].
+     * Returns the physical address for the entry with the greatest xid <= [targetXid].
      */
-    fun omapLookup(omapTreeRootAddr: Long, targetOid: Long, targetXid: Long = Long.MAX_VALUE): Long? {
-        return omapLookupNode(omapTreeRootAddr, targetOid, targetXid, 0)
-    }
+    fun omapLookup(omapTreeRootAddr: Long, targetOid: Long, targetXid: Long = Long.MAX_VALUE): Long? =
+        omapLookupNode(omapTreeRootAddr, targetOid, targetXid, 0)
 
     private fun omapLookupNode(blockAddr: Long, targetOid: Long, targetXid: Long, depth: Int): Long? {
         if (depth > MAX_DEPTH) return null
         val data = readBlock(blockAddr) ?: return null
         val node = ApfsBTreeNode.parse(data) ?: return null
-
         if (node.nkeys == 0) return null
 
         if (node.isLeaf) {
-            // FIXED_KV_SIZE leaf: key=omap_key_t (16 bytes), value=omap_val_t (16 bytes)
+            var bestXid = -1L
+            var bestPaddr: Long? = null
             for (i in 0 until node.nkeys) {
                 val toc = node.getFixedTocEntry(i)
                 val kOff = node.keyOffset(toc.k)
@@ -62,135 +60,121 @@ class ApfsBTreeParser(
                 val kBuf = ByteBuffer.wrap(data, kOff, 16).order(ByteOrder.LITTLE_ENDIAN)
                 val oid = kBuf.getLong()
                 val xid = kBuf.getLong()
-                if (oid == targetOid && xid <= targetXid) {
-                    // Value stored from end of block
+                if (oid == targetOid && xid <= targetXid && xid > bestXid) {
                     val vOff = node.fixedValueOffset(toc.v)
                     if (vOff < 0 || vOff + 16 > data.size) continue
                     val vBuf = ByteBuffer.wrap(data, vOff, 16).order(ByteOrder.LITTLE_ENDIAN)
                     vBuf.getInt() // flags
                     vBuf.getInt() // size
-                    val paddr = vBuf.getLong()
-                    return paddr
+                    bestXid = xid
+                    bestPaddr = vBuf.getLong()
                 }
             }
-            return null
-        } else {
-            // Internal node: find the right child
-            // For internal nodes, values are child block addresses (uint64)
-            // Binary search: find largest key <= target
-            var childAddr: Long? = null
-            for (i in 0 until node.nkeys) {
-                val toc = node.getFixedTocEntry(i)
-                val kOff = node.keyOffset(toc.k)
-                if (kOff + 8 > data.size) continue
-                val kBuf = ByteBuffer.wrap(data, kOff, 8).order(ByteOrder.LITTLE_ENDIAN)
-                val oid = kBuf.getLong()
-                if (oid <= targetOid) {
-                    val vOff = node.fixedValueOffset(toc.v)
-                    if (vOff < 0 || vOff + 8 > data.size) continue
-                    val vBuf = ByteBuffer.wrap(data, vOff, 8).order(ByteOrder.LITTLE_ENDIAN)
-                    childAddr = vBuf.getLong()
-                }
-            }
-            return if (childAddr != null) omapLookupNode(childAddr, targetOid, targetXid, depth + 1) else null
+            return bestPaddr
         }
+
+        // Interior node: child of the last key <= (targetOid, targetXid).
+        var childAddr: Long? = null
+        for (i in 0 until node.nkeys) {
+            val toc = node.getFixedTocEntry(i)
+            val kOff = node.keyOffset(toc.k)
+            if (kOff + 16 > data.size) continue
+            val kBuf = ByteBuffer.wrap(data, kOff, 16).order(ByteOrder.LITTLE_ENDIAN)
+            val oid = kBuf.getLong()
+            val xid = kBuf.getLong()
+            if (oid < targetOid || (oid == targetOid && xid <= targetXid)) {
+                val vOff = node.fixedValueOffset(toc.v)
+                if (vOff < 0 || vOff + 8 > data.size) continue
+                childAddr = ByteBuffer.wrap(data, vOff, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
+            } else break
+        }
+        return childAddr?.let { omapLookupNode(it, targetOid, targetXid, depth + 1) }
     }
 
     /**
-     * Scan the filesystem B-Tree rooted at fsTreeRootAddr and collect all file entries.
-     * Returns a list of (oid, inode, name, parentId, extents).
+     * Scan the whole filesystem tree whose (virtual) root is [rootOid]. [resolve] maps a virtual
+     * OID to its physical block (volume OMAP lookup).
      */
-    fun scanFsTree(fsTreeRootAddr: Long): List<FsTreeResult> {
+    fun scanFsTree(rootOid: Long, resolve: (Long) -> Long?): List<FsTreeResult> {
         val inodes = mutableMapOf<Long, ApfsInodeRecord>()
-        val dirEntries = mutableListOf<Triple<Long, String, Long>>() // (parentOid, name, fileOid)
-        val extents = mutableMapOf<Long, MutableList<ApfsExtent>>() // fileOid -> extents
-
-        collectFsRecords(fsTreeRootAddr, inodes, dirEntries, extents, 0)
+        val dirEntries = mutableListOf<DirRec>()
+        val extents = mutableMapOf<Long, MutableList<ApfsExtent>>()
+        collectFsRecords(rootOid, resolve, inodes, dirEntries, extents, 0)
 
         val results = mutableListOf<FsTreeResult>()
-        for ((parentOid, name, fileOid) in dirEntries) {
-            val inode = inodes[fileOid] ?: continue
-            val fileExtents = extents[fileOid] ?: emptyList()
-            results.add(FsTreeResult(fileOid, parentOid, name, inode, fileExtents))
+        for (d in dirEntries) {
+            val inode = inodes[d.fileOid] ?: continue
+            results.add(FsTreeResult(d.fileOid, d.parentOid, d.name, inode, extents[d.fileOid]?.sortedBy { it.logicalAddr } ?: emptyList()))
         }
         return results
     }
 
+    private class DirRec(val parentOid: Long, val name: String, val fileOid: Long, val type: Int)
+
     private fun collectFsRecords(
-        blockAddr: Long,
+        nodeOid: Long,
+        resolve: (Long) -> Long?,
         inodes: MutableMap<Long, ApfsInodeRecord>,
-        dirEntries: MutableList<Triple<Long, String, Long>>,
+        dirEntries: MutableList<DirRec>,
         extents: MutableMap<Long, MutableList<ApfsExtent>>,
         depth: Int
     ) {
         if (depth > MAX_DEPTH) return
-        val data = readBlock(blockAddr) ?: return
+        val paddr = resolve(nodeOid) ?: run { Log.w(TAG, "APFS: cannot resolve fs-tree node oid=$nodeOid"); return }
+        val data = readBlock(paddr) ?: return
         val node = ApfsBTreeNode.parse(data) ?: return
 
         if (!node.isLeaf) {
-            // Internal node: recurse into children.
-            // Value offsets are from end of block going backwards (variable KV).
             for (i in 0 until node.nkeys) {
                 val toc = node.getVariableTocEntry(i)
-                val vOff = data.size - toc.vOff  // value offset from end of block
+                val vOff = node.variableValueOffset(toc.vOff)
                 if (vOff < 0 || vOff + 8 > data.size) continue
-                val vBuf = ByteBuffer.wrap(data, vOff, 8).order(ByteOrder.LITTLE_ENDIAN)
-                val childAddr = vBuf.getLong()
-                if (childAddr > 0) {
-                    collectFsRecords(childAddr, inodes, dirEntries, extents, depth + 1)
-                }
+                val childOid = ByteBuffer.wrap(data, vOff, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
+                if (childOid != 0L) collectFsRecords(childOid, resolve, inodes, dirEntries, extents, depth + 1)
             }
             return
         }
 
-        // Leaf node: parse records
         for (i in 0 until node.nkeys) {
             try {
                 val toc = node.getVariableTocEntry(i)
                 val kStart = node.keyOffset(toc.kOff)
                 val kLen = toc.kLen
                 if (kStart < 0 || kStart + 8 > data.size || kLen < 8) continue
-
-                val keyBuf = ByteBuffer.wrap(data, kStart, kLen).order(ByteOrder.LITTLE_ENDIAN)
-                val idAndType = keyBuf.getLong()
+                val idAndType = ByteBuffer.wrap(data, kStart, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
                 val recType = ((idAndType ushr 60) and 0xFL).toInt()
                 val oid = idAndType and 0x0FFFFFFFFFFFFFFFL
-
-                // Value offset: from end of block going backwards
-                val vStart = data.size - toc.vOff
+                val vStart = node.variableValueOffset(toc.vOff)
                 val vLen = toc.vLen
                 if (vStart < 0 || vStart + vLen > data.size) continue
 
                 when (recType) {
-                    ApfsConstants.APFS_TYPE_INODE -> {
-                        val inode = ApfsInodeRecord.parse(data, vStart) ?: continue
-                        inodes[oid] = inode
-                    }
+                    ApfsConstants.APFS_TYPE_INODE -> ApfsInodeRecord.parse(data, vStart, vLen)?.let { inodes[oid] = it }
                     ApfsConstants.APFS_TYPE_DIR_REC -> {
-                        if (kLen < 12) continue
-                        val nameLenAndHash = ByteBuffer.wrap(data, kStart + 8, 4).order(ByteOrder.LITTLE_ENDIAN).getInt()
-                        val nameLen = nameLenAndHash and 0x3FF
+                        if (kLen < 12 || vLen < 18) continue
+                        // j_drec_hashed_key_t: name_len_and_hash (u32: low 10 bits = length incl. NUL), then name.
+                        val nameLen = ByteBuffer.wrap(data, kStart + 8, 4).order(ByteOrder.LITTLE_ENDIAN).getInt() and 0x3FF
                         if (nameLen <= 0 || kStart + 12 + nameLen > data.size) continue
-                        val nameRaw = ByteArray(nameLen)
-                        System.arraycopy(data, kStart + 12, nameRaw, 0, nameLen)
-                        val name = String(nameRaw, 0, if (nameLen > 0 && nameRaw[nameLen - 1] == 0.toByte()) nameLen - 1 else nameLen, Charsets.UTF_8)
-                        if (vLen < 18) continue
-                        val fileId = ByteBuffer.wrap(data, vStart, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
-                        dirEntries.add(Triple(oid, name, fileId))
+                        val end = if (data[kStart + 12 + nameLen - 1] == 0.toByte()) nameLen - 1 else nameLen
+                        val name = String(data, kStart + 12, end, Charsets.UTF_8)
+                        val vb = ByteBuffer.wrap(data, vStart, vLen).order(ByteOrder.LITTLE_ENDIAN)
+                        val fileId = vb.getLong()
+                        vb.getLong() // date_added
+                        val flags = vb.getShort().toInt() and 0xFFFF
+                        dirEntries.add(DirRec(oid, name, fileId, flags and 0xF))
                     }
                     ApfsConstants.APFS_TYPE_FILE_EXTENT -> {
                         if (kLen < 16 || vLen < 24) continue
                         val logicalAddr = ByteBuffer.wrap(data, kStart + 8, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
-                        val lenAndFlags = ByteBuffer.wrap(data, vStart, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
-                        val length = lenAndFlags and 0x00FFFFFFFFFFFFFFL
-                        val physBlockNum = ByteBuffer.wrap(data, vStart + 8, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
-                        val cryptoId = ByteBuffer.wrap(data, vStart + 16, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
-                        val extent = ApfsExtent(logicalAddr, physBlockNum, length, cryptoId)
-                        extents.getOrPut(oid) { mutableListOf() }.add(extent)
+                        val vb = ByteBuffer.wrap(data, vStart, 24).order(ByteOrder.LITTLE_ENDIAN)
+                        val length = vb.getLong() and 0x00FFFFFFFFFFFFFFL
+                        val physBlockNum = vb.getLong()
+                        val cryptoId = vb.getLong()
+                        extents.getOrPut(oid) { mutableListOf() }.add(ApfsExtent(logicalAddr, physBlockNum, length, cryptoId))
                     }
                 }
             } catch (e: Exception) {
-                // Skip malformed entries
+                // skip malformed record
             }
         }
     }

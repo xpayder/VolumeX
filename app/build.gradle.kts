@@ -31,6 +31,16 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+            all {
+                it.systemProperty("fixtures.dir", layout.buildDirectory.dir("fixtures").get().asFile.path)
+                it.maxHeapSize = "2g"
+                it.testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+            }
+        }
+    }
 }
 
 dependencies {

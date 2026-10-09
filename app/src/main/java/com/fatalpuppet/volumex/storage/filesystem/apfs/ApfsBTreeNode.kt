@@ -29,7 +29,7 @@ data class ApfsBTreeNode(
     private val dataAreaStart = 0x38
 
     // Key area start = dataAreaStart + tableSpaceLen
-    val keyAreaStart: Int get() = dataAreaStart + tableSpaceLen
+    val keyAreaStart: Int get() = dataAreaStart + tableSpaceOff + tableSpaceLen
 
     // TOC starts at dataAreaStart + tableSpaceOff (usually 0x38)
     val tocStart: Int get() = dataAreaStart + tableSpaceOff
@@ -69,11 +69,16 @@ data class ApfsBTreeNode(
      * For a FIXED_KV_SIZE leaf node, value offset from end of block.
      * val_off in TOC is the offset FROM THE END going backwards.
      */
-    fun fixedValueOffset(tocValOff: Int): Int {
-        return data.size - tocValOff
-    }
+    fun fixedValueOffset(tocValOff: Int): Int = valueAreaEnd - tocValOff
+
+    /** Value area ends at the block end, minus the 40-byte btree_info_t that root nodes carry. */
+    val valueAreaEnd: Int get() = data.size - (if (isRoot) BTREE_INFO_SIZE else 0)
+
+    /** Absolute offset of a value for a variable-size TOC entry. */
+    fun variableValueOffset(tocValOff: Int): Int = valueAreaEnd - tocValOff
 
     companion object {
+        const val BTREE_INFO_SIZE = 40
         fun parse(data: ByteArray): ApfsBTreeNode? {
             if (data.size < 0x40) return null
             val buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)

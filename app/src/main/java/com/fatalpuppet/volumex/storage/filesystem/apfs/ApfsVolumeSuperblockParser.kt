@@ -8,7 +8,7 @@ object ApfsVolumeSuperblockParser {
     private const val TAG = "VolumeX"
 
     fun parse(data: ByteArray): ApfsVolumeSuperblock? {
-        if (data.size < 0x420) {
+        if (data.size < 0x3C0) {
             Log.w(TAG, "Volume superblock data too small: ${data.size}")
             return null
         }
@@ -65,41 +65,29 @@ object ApfsVolumeSuperblockParser {
         // apfs_snap_meta_tree_oid at 0x98
         val snapMetaTreeOid = buf.getLong()
 
-        // apfs_next_obj_id at 0xA0
+        // apfs_revert_to_xid (0xA0) and apfs_revert_to_sblock_oid (0xA8)
+        buf.position(0xB0)
+        // apfs_next_obj_id at 0xB0
         val nextObjId = buf.getLong()
-
-        // apfs_num_files at 0xA8
-        val numFiles = buf.getLong()
-        // apfs_num_directories at 0xB0
-        val numDirs = buf.getLong()
-        // apfs_num_symlinks at 0xB8
-        val numSymlinks = buf.getLong()
-        // apfs_num_other_fsobjects at 0xC0
-        val numOtherFsObjects = buf.getLong()
-        // apfs_num_snapshots at 0xC8
-        val numSnapshots = buf.getLong()
-
-        // skip total blocks 0xD0, 0xD8
-        buf.getLong(); buf.getLong()
-
-        // apfs_vol_uuid at 0xE0 (16 bytes)
-        buf.position(0xE0)
-        val volUuid = ByteArray(16)
+        val numFiles = buf.getLong()          // 0xB8
+        val numDirs = buf.getLong()           // 0xC0
+        val numSymlinks = buf.getLong()       // 0xC8
+        val numOtherFsObjects = buf.getLong() // 0xD0
+        val numSnapshots = buf.getLong()      // 0xD8
+        // total blocks alloced 0xE0, freed 0xE8
+        buf.position(0xF0)
+        val volUuid = ByteArray(16)           // apfs_vol_uuid at 0xF0
         buf.get(volUuid)
-
-        // apfs_last_mod_time at 0xF0
-        val lastModTime = buf.getLong()
-        // apfs_fs_flags at 0xF8
-        val fsFlags = buf.getLong()
-
-        // apfs_vol_name at 0x400 (256 bytes)
-        buf.position(0x400)
-        val nameBytes = ByteArray(256)
+        val lastModTime = buf.getLong()       // 0x100
+        val fsFlags = buf.getLong()           // 0x108
+        // apfs_vol_name at 0x2C0 (256 bytes, UTF-8)
+        buf.position(0x2C0)
+                val nameBytes = ByteArray(256)
         buf.get(nameBytes)
         val nameEnd = nameBytes.indexOfFirst { it == 0.toByte() }.takeIf { it >= 0 } ?: nameBytes.size
         val volumeName = String(nameBytes, 0, nameEnd, Charsets.UTF_8)
 
-        Log.i(TAG, "APFS Volume: name='$volumeName', encrypted=${(incompatFeatures and 0x01L) != 0L}")
+        Log.i(TAG, "APFS Volume: name='$volumeName', fsFlags=0x${fsFlags.toString(16)}")
 
         return ApfsVolumeSuperblock(
             header = header,

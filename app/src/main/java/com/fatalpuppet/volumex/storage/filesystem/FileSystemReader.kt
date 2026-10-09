@@ -14,6 +14,17 @@ interface FileSystemReader {
     fun readFile(entry: FileSystemEntry): ByteArray?
 
     /**
+     * Stream the content of [entry] to [out] without holding the whole file in memory.
+     * The default implementation falls back to [readFile].
+     */
+    fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)? = null): Boolean {
+        val data = readFile(entry) ?: return false
+        out.write(data)
+        onProgress?.invoke(data.size.toLong())
+        return true
+    }
+
+    /**
      * Recursively search for files whose name contains [query] (case-insensitive).
      * Default implementation does a depth-limited scan from root.
      */

@@ -10,6 +10,7 @@ import com.fatalpuppet.volumex.storage.ActiveDriveSession
 import com.fatalpuppet.volumex.storage.crypto.LuksDecryptor
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemReader
+import com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemWriter
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
 import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsContainerSuperblockParser
@@ -133,7 +134,7 @@ class MainViewModel : ViewModel() {
     }
 
     private fun mountWithDevice(device: BlockDeviceReader, deviceName: String) {
-        val result = tryMountFilesystem(device)
+        val result = FilesystemMounter.mount(device)
         if (result == null) {
             _deviceState.value = DeviceState.Error("No supported filesystem found")
             _statusMessage.value = "Unsupported filesystem"
@@ -152,79 +153,6 @@ class MainViewModel : ViewModel() {
         )
         _statusMessage.value = "Connected: ${volumes.size} volume(s) found${if (fsWriter != null) " (writable)" else " (read-only)"}"
         Log.i(TAG, "Mounted filesystem with ${volumes.size} volume(s) writable=${fsWriter != null}")
-    }
-
-    private fun tryMountFilesystem(device: BlockDeviceReader): Pair<FileSystemReader, FileSystemWriter?>? {
-        // Check for LVM
-        val effectiveDevice: BlockDeviceReader = if (LvmParser.detect(device)) {
-            val pv = LvmParser.parsePV(device) ?: return null
-            val meta = LvmParser.readVgMetadata(device, pv) ?: return null
-            val extSize = LvmParser.parseExtentSize(meta)
-            val lvs = LvmParser.parseLogicalVolumes(meta)
-            if (lvs.isEmpty()) return null
-            Log.i(TAG, "LVM: found ${lvs.size} logical volume(s), using first: ${lvs[0].name}")
-            LvmBlockDevice(device, lvs[0], extSize)
-        } else {
-            device
-        }
-
-        val probeOffsets = listOf(0L, 40L, 56L, 64L, 128L, 2048L)
-        for (lba in probeOffsets) {
-            tryApfs(effectiveDevice, lba)?.let { return it }
-            tryHfsPlus(effectiveDevice, lba)?.let { return it }
-            tryFat32(effectiveDevice, lba)?.let { return it }
-            tryExFat(effectiveDevice, lba)?.let { return it }
-            tryExt(effectiveDevice, lba)?.let { return it }
-        }
-        return null
-    }
-
-    private fun tryApfs(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
-        val reader = ApfsReader(device, lba)
-        if (!reader.mount()) return null
-        Log.i(TAG, "APFS at LBA $lba")
-        val btree = ApfsBTreeParser(device, lba, 4096L)
-        val block0 = btree.readBlock(0) ?: return Pair(reader, null)
-        val csb = ApfsContainerSuperblockParser.parse(block0) ?: return Pair(reader, null)
-        val omap = btree.readBlock(csb.omapOid)?.let { ApfsOMapParser.parse(it) } ?: return Pair(reader, null)
-        val volPaddr = btree.omapLookup(omap.treeOid, csb.fsOids.firstOrNull { it != 0L } ?: 0L) ?: return Pair(reader, null)
-        val volData = btree.readBlock(volPaddr) ?: return Pair(reader, null)
-        val volSb = ApfsVolumeSuperblockParser.parse(volData) ?: return Pair(reader, null)
-        val btree2 = ApfsBTreeParser(device, lba, csb.blockSize)
-        return Pair(reader, ApfsWriter(device, lba, csb, volSb, btree2))
-    }
-
-    private fun tryHfsPlus(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
-        val reader = HfsPlusReader(device, lba)
-        if (!reader.mount()) return null
-        Log.i(TAG, "HFS+ at LBA $lba")
-        val sectorSize = device.sectorSize()
-        val headerSector = lba + 2  // HFS+ VH is at byte 1024 = sector 2 for 512-byte sectors
-        val sector = device.readSector(headerSector) ?: return Pair(reader, null)
-        val header = HfsPlusVolumeHeaderParser.parse(sector) ?: return Pair(reader, null)
-        return Pair(reader, HfsPlusWriter(device, lba, header))
-    }
-
-    private fun tryFat32(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
-        val reader = Fat32Reader(device, lba)
-        if (!reader.mount()) return null
-        Log.i(TAG, "FAT32 at LBA $lba")
-        val header = reader.getVolumeHeader() ?: return Pair(reader, null)
-        return Pair(reader, Fat32Writer(device, header))
-    }
-
-    private fun tryExFat(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
-        val reader = ExFatReader(device, lba)
-        if (!reader.mount()) return null
-        Log.i(TAG, "exFAT at LBA $lba")
-        return Pair(reader, ExFatWriter(device, reader))
-    }
-
-    private fun tryExt(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
-        val reader = ExtReader(device, lba)
-        if (!reader.mount()) return null
-        Log.i(TAG, "ext at LBA $lba")
-        return Pair(reader, null) // ext write not implemented
     }
 
     fun disconnectDevice() {

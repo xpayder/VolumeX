@@ -23,7 +23,8 @@ data class ApfsVolumeSuperblock(
 ) {
     // Backward compat
     val rootDirectoryObjectId: Long get() = rootTreeOid
-    val isEncrypted: Boolean get() = (incompatibleFeatures and 0x01L) != 0L
+    /** APFS_FS_UNENCRYPTED (bit 0 of apfs_fs_flags) is set on volumes that are NOT encrypted. */
+    val isEncrypted: Boolean get() = (fsFlags and 0x01L) == 0L
     val volUuidString: String get() = volUuid.joinToString("") { "%02X".format(it) }
         .let { h ->
             if (h.length >= 32)
