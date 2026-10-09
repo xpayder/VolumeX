@@ -208,6 +208,7 @@ class MainViewModel : ViewModel() {
         activeReader?.close()
         activeReader = null
         (_deviceState.value as? DeviceState.Connected)?.reader?.unmount()
+        com.fatalpuppet.volumex.ui.screens.AudioSession.stop()
         ActiveDriveSession.clear()
         _deviceState.value = DeviceState.Disconnected
         _statusMessage.value = "Disconnected"

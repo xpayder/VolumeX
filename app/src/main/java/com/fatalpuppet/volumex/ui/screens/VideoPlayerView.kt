@@ -69,6 +69,24 @@ class PlayerState(val player: ExoPlayer) {
     fun changeSpeed(s: Float) { speed = s; player.setPlaybackSpeed(s) }
 }
 
+/** Mirrors the ExoPlayer's state into this holder; returns a function that detaches the listener. */
+fun PlayerState.attach(onTransition: ((String?) -> Unit)? = null): () -> Unit {
+    val st = this
+    val l = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) { st.playing = isPlaying }
+        override fun onPlaybackStateChanged(s: Int) {
+            st.buffering = s == Player.STATE_BUFFERING
+            st.ended = s == Player.STATE_ENDED
+            if (s == Player.STATE_READY) st.duration = st.player.duration.coerceAtLeast(0)
+        }
+        override fun onMediaItemTransition(item: MediaItem?, reason: Int) { st.duration = 0; st.position = 0; onTransition?.invoke(item?.mediaId) }
+        override fun onVideoSizeChanged(v: VideoSize) { if (v.width > 0 && v.height > 0) st.aspect = v.width * v.pixelWidthHeightRatio / v.height }
+        override fun onPlayerError(e: PlaybackException) { st.error = "This format can't be played inside VolumeX" }
+    }
+    player.addListener(l)
+    return { player.removeListener(l) }
+}
+
 @Composable
 fun rememberPlayerState(uri: Uri): PlayerState {
     val ctx = LocalContext.current
@@ -80,18 +98,8 @@ fun rememberPlayerState(uri: Uri): PlayerState {
         PlayerState(p)
     }
     DisposableEffect(state) {
-        val l = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) { state.playing = isPlaying }
-            override fun onPlaybackStateChanged(s: Int) {
-                state.buffering = s == Player.STATE_BUFFERING
-                state.ended = s == Player.STATE_ENDED
-                if (s == Player.STATE_READY) state.duration = state.player.duration.coerceAtLeast(0)
-            }
-            override fun onVideoSizeChanged(v: VideoSize) { if (v.width > 0 && v.height > 0) state.aspect = v.width * v.pixelWidthHeightRatio / v.height }
-            override fun onPlayerError(e: PlaybackException) { state.error = "This format can't be played inside VolumeX" }
-        }
-        state.player.addListener(l)
-        onDispose { state.player.removeListener(l); state.player.release() }
+        val detach = state.attach()
+        onDispose { detach(); state.player.release() }
     }
     LaunchedEffect(state) { while (isActive) { state.position = state.player.currentPosition; delay(250) } }
     return state

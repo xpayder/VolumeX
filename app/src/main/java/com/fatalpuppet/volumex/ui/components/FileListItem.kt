@@ -33,11 +33,12 @@ import java.util.*
 fun FileListItem(
     entry: FileSystemEntry,
     isSelected: Boolean = false,
+    highlight: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {}
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) GlassWhite16 else Color.Transparent,
+        targetValue = if (isSelected) GlassWhite16 else if (highlight) GlassWhite8 else Color.Transparent,
         label = "bgColor"
     )
     val borderColor = if (isSelected) AccentBlue else Color.Transparent
@@ -61,7 +62,7 @@ fun FileListItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.name,
-                color = TextPrimary,
+                color = if (highlight) AccentBlue else TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,

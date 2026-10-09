@@ -106,7 +106,13 @@ fun FileBrowserScreen(
     }
     fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; askDest = true } }
 
-    fun open(entry: FileSystemEntry) { if (entry.isDirectory) viewModel.openEntry(entry) else onOpenPreview?.invoke(entry) }
+    fun open(entry: FileSystemEntry) {
+        when {
+            entry.isDirectory -> viewModel.openEntry(entry)
+            entry.fileType == FileType.AUDIO -> AudioSession.play(context, entry, visible.filter { it.fileType == FileType.AUDIO && !it.isDirectory })
+            else -> onOpenPreview?.invoke(entry)
+        }
+    }
     fun back() {
         when {
             selected.isNotEmpty() -> viewModel.clearSelection()
@@ -186,6 +192,10 @@ fun FileBrowserScreen(
                 }
             }
 
+            // grid view has no row to expand, so the same controls sit under the header
+            AnimatedVisibility(visible = AudioSession.active && (viewMode == ViewMode.GRID || searchActive && searchQuery.isNotBlank())) {
+                AudioMiniControls(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), showTitle = true)
+            }
             AnimatedVisibility(visible = searchActive) {
                 BrowserSearchField(searchQuery, { viewModel.search(it) }, { searchActive = false; viewModel.search("") })
             }
@@ -210,7 +220,11 @@ fun FileBrowserScreen(
                 }
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     items(display, key = { it.path }) { e ->
-                        FileListItem(entry = e, isSelected = selected.contains(e.path), onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
+                        val playing = AudioSession.currentPath == e.path
+                        Column {
+                            FileListItem(entry = e, isSelected = selected.contains(e.path), highlight = playing, onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
+                            AnimatedVisibility(visible = playing) { AudioMiniControls(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 6.dp)) }
+                        }
                     }
                 }
             }
