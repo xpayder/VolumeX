@@ -169,6 +169,8 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "Failed to register USB receiver", e)
         }
 
+        handleDebugImage(intent)
+
         // Auto-scan for USB devices
         lifecycleScope.launch {
             scanForUsbDevices()
@@ -181,6 +183,25 @@ class MainActivity : ComponentActivity() {
             unregisterReceiver(usbPermissionReceiver)
         } catch (e: Exception) { /* ignore */ }
         mainViewModel.disconnectDevice()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDebugImage(intent)
+    }
+
+    /** Debug builds only: `am start ... --es vx_image <path>` mounts a disk image instead of a USB drive. */
+    private fun handleDebugImage(intent: android.content.Intent?) {
+        val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!debuggable) return
+        intent?.getStringExtra("vx_image")?.let { mainViewModel.mountImage(it) }
+        // Same code path as the "Add files" picker, driven by file path (for automated tests).
+        intent?.getStringExtra("vx_import")?.let { path ->
+            fileBrowserViewModel.importUris(this, listOf(android.net.Uri.fromFile(java.io.File(path))))
+        }
+        // Navigate the browser (debug automation): --es vx_cd /folder
+        intent?.getStringExtra("vx_cd")?.let { fileBrowserViewModel.navigateTo(it) }
     }
 
     private fun scanForUsbDevices() {

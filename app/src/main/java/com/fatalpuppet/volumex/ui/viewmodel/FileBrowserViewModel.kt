@@ -240,6 +240,7 @@ class FileBrowserViewModel : ViewModel() {
     fun importUris(context: Context, uris: List<Uri>) {
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val dest = currentPath
+        Log.i(TAG, "importUris: ${uris.size} file(s) into '$dest'")
         viewModelScope.launch(Dispatchers.IO) {
             val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launch }
             val resolver = context.contentResolver
@@ -261,6 +262,7 @@ class FileBrowserViewModel : ViewModel() {
                 try {
                     val size = if (size0 >= 0) size0 else resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
                     if (size < 0) throw java.io.IOException("unknown file size")
+                    Log.i(TAG, "importUris: writing '$name' ($size bytes)")
                     val ok = resolver.openInputStream(uri)?.use { input ->
                         w.writeFileStream(parent, name, size, input) { done ->
                             updateProgress(progresses, idx, TransferProgress(name, done, size))

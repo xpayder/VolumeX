@@ -117,6 +117,24 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /** Debug only: mount a raw disk image file as if it were a USB drive. */
+    fun mountImage(path: String) {
+        viewModelScope.launch {
+            _deviceState.value = DeviceState.Connecting
+            _statusMessage.value = "Opening image ${java.io.File(path).name}…"
+            withContext(Dispatchers.IO) {
+                try {
+                    val dev = com.fatalpuppet.volumex.storage.disk.FileImageBlockDevice(java.io.File(path))
+                    if (!dev.open()) { _deviceState.value = DeviceState.Error("Cannot open image"); return@withContext }
+                    mountWithDevice(dev, java.io.File(path).name)
+                } catch (e: Exception) {
+                    Log.e(TAG, "mountImage failed", e)
+                    _deviceState.value = DeviceState.Error("Image error: ${e.message}")
+                }
+            }
+        }
+    }
+
     fun unlockLuks(passphrase: String) {
         val rawDevice = pendingLuksDevice ?: return
         viewModelScope.launch {
