@@ -21,14 +21,16 @@ class WriteFixtureTest(private val name: String) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
-        fun params() = listOf("hfs", "exfat", "exfatbig", "fat32")
+        fun params() = listOf("apfs", "hfs", "exfat", "exfatbig", "fat32")
         private val dir = File(System.getProperty("fixtures.dir") ?: "build/fixtures")
+        init { FilesystemMounter.enableApfsWrite = true }
     }
 
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
     private fun root(r: com.fatalpuppet.volumex.storage.filesystem.FileSystemReader): FileSystemEntry = when (name) {
         "hfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, hfsCatalogId = 2)
+        "apfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = 2)
         "exfat", "exfatbig" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatReader).getBootSector()!!.rootDirectoryCluster.toLong())
         else -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.fat32.Fat32Reader).getVolumeHeader()!!.rootCluster)
     }

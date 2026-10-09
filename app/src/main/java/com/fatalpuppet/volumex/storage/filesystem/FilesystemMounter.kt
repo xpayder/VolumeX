@@ -23,6 +23,8 @@ import com.fatalpuppet.volumex.storage.filesystem.partition.MbrPartitionTable
 
 /** Detects and mounts a filesystem on a raw block device (extracted from MainViewModel so it is testable off-device). */
 object FilesystemMounter {
+    /** Opt-in switch for the experimental APFS writer (Settings > Experimental). */
+    @Volatile var enableApfsWrite: Boolean = false
     private const val TAG = "VolumeX"
 
     /** A filesystem found on the device (one per partition; APFS may expose several volumes). */
@@ -95,8 +97,8 @@ object FilesystemMounter {
         val reader = ApfsReader(device, lba)
         if (!reader.mount()) return null
         Log.i(TAG, "APFS at LBA $lba")
-        // Read-only: ApfsWriter has not been validated against macOS (fsck_apfs) and must not touch real drives.
-        return Pair(reader, null)
+        // Experimental in-place writer: off unless the user enabled it (it is not copy-on-write).
+        return Pair(reader, if (enableApfsWrite) ApfsWriter(device, lba) else null)
     }
 
     private fun tryHfsPlus(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {

@@ -46,6 +46,7 @@ class ApfsReader(
         val byOid: Map<Long, FsTreeResult>
     )
     private val volumes = HashMap<Int, Volume?>()
+    private val stamps = HashMap<Int, Long>()
 
     private fun parser(blockSize: Long) = ApfsBTreeParser(reader, partitionStartLba, blockSize)
 
@@ -71,7 +72,28 @@ class ApfsReader(
     }
 
     /** Resolves volume [index], reading and caching its whole filesystem tree. */
-    private fun volume(index: Int): Volume? = volumes.getOrPut(index) { loadVolume(index) }
+    private fun volume(index: Int): Volume? {
+        val cached = volumes[index]
+        if (cached != null) {
+            // The in-place writer does not create a new transaction, so detect changes from the volume superblock itself.
+            val now = currentStamp(index)
+            if (now != null && now != stamps[index]) { volumes.remove(index); return volumes.getOrPut(index) { loadVolume(index) } }
+            return cached
+        }
+        return volumes.getOrPut(index) { loadVolume(index) }
+    }
+
+    private fun volumeSuperblock(index: Int): ApfsVolumeSuperblock? {
+        val sb = containerSb ?: return null
+        val btree = parser(sb.blockSize)
+        val containerOmap = btree.readBlock(sb.omapOid)?.let { ApfsOMapParser.parse(it) } ?: return null
+        val volOids = sb.fsOids.filter { it != 0L }
+        if (index !in volOids.indices) return null
+        val volPaddr = btree.omapLookup(containerOmap.treeOid, volOids[index], sb.header.xid) ?: return null
+        return btree.readBlock(volPaddr)?.let { ApfsVolumeSuperblockParser.parse(it) }
+    }
+
+    private fun currentStamp(index: Int): Long? = volumeSuperblock(index)?.let { it.lastModTime xor (it.nextObjId shl 7) xor (it.numFiles shl 21) xor it.numDirectories }
 
     private fun loadVolume(index: Int): Volume? {
         val sb = containerSb ?: return null
@@ -83,6 +105,7 @@ class ApfsReader(
 
         val volPaddr = btree.omapLookup(containerOmap.treeOid, volOids[index], sb.header.xid) ?: return null
         val volSb = btree.readBlock(volPaddr)?.let { ApfsVolumeSuperblockParser.parse(it) } ?: return null
+        stamps[index] = volSb.lastModTime xor (volSb.nextObjId shl 7) xor (volSb.numFiles shl 21) xor volSb.numDirectories
         val volOmap = btree.readBlock(volSb.omapOid)?.let { ApfsOMapParser.parse(it) } ?: return null
         val xid = volSb.header.xid
         val results = btree.scanFsTree(volSb.rootTreeOid) { oid -> btree.omapLookup(volOmap.treeOid, oid, xid) }
