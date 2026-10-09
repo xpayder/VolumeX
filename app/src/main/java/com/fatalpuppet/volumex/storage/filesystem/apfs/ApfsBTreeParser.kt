@@ -15,7 +15,8 @@ import java.nio.ByteOrder
 class ApfsBTreeParser(
     private val reader: BlockDeviceReader,
     private val partitionStartLba: Long,
-    private val blockSize: Long
+    private val blockSize: Long,
+    private val xts: com.fatalpuppet.volumex.storage.crypto.AesXts? = null
 ) {
     companion object {
         private const val TAG = "VolumeX"
@@ -28,7 +29,21 @@ class ApfsBTreeParser(
     fun readBlock(blockAddr: Long): ByteArray? {
         if (blockAddr < 0) return null
         val lba = partitionStartLba + blockAddr * sectorsPerBlock
-        return reader.readSectors(lba, sectorsPerBlock.toInt())
+        val raw = reader.readSectors(lba, sectorsPerBlock.toInt()) ?: return null
+        // Container-level objects are plain; a FileVault volume's own metadata is AES-XTS (tweak = paddr * 8).
+        if (xts != null && !ApfsReader.checksumOk(raw)) {
+            val dec = xts.decrypt(raw, blockAddr * (blockSize / 512))
+            if (ApfsReader.checksumOk(dec)) return dec
+        }
+        return raw
+    }
+
+    /** Reads a file-data block, decrypting it when the volume is encrypted. */
+    fun readDataBlock(blockAddr: Long): ByteArray? {
+        if (blockAddr < 0) return null
+        val lba = partitionStartLba + blockAddr * sectorsPerBlock
+        val raw = reader.readSectors(lba, sectorsPerBlock.toInt()) ?: return null
+        return xts?.decrypt(raw, blockAddr * (blockSize / 512)) ?: raw
     }
 
     /**

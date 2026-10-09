@@ -27,6 +27,8 @@ data class FileSystemEntry(
     val contiguous: Boolean = false,
     // which mounted partition the entry belongs to (multi-partition drives)
     val partitionId: Int = 0,
+    // APFS: which volume of the container the entry belongs to (selects its decryption key)
+    val volumeIndex: Int = 0,
     val allocLength: Long = 0L
 ) {
     val extension: String get() {

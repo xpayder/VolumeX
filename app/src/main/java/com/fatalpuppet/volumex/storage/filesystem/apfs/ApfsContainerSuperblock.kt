@@ -21,7 +21,8 @@ data class ApfsContainerSuperblock(
     val omapOid: Long,         // OID of container object map
     val reaperOid: Long,
     val maxFileSystems: Int,
-    val fsOids: LongArray      // OIDs of volume superblocks
+    val fsOids: LongArray,     // OIDs of volume superblocks
+    val keylockerAddr: Long = 0L   // nx_keylocker.pr_start_paddr (FileVault key bag)
 ) {
     // Keep backward-compat fields used by old code
     val volumeCount: Int get() = fsOids.count { it != 0L }

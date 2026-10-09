@@ -98,7 +98,7 @@ object FilesystemMounter {
         if (!reader.mount()) return null
         Log.i(TAG, "APFS at LBA $lba")
         // Experimental in-place writer: off unless the user enabled it (it is not copy-on-write).
-        return Pair(reader, if (enableApfsWrite) ApfsWriter(device, lba) else null)
+        return Pair(reader, if (enableApfsWrite && !reader.hasEncryptedVolume()) ApfsWriter(device, lba) else null)
     }
 
     private fun tryHfsPlus(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {

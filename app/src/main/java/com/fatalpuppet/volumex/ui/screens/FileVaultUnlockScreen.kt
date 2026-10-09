@@ -1,12 +1,13 @@
 package com.fatalpuppet.volumex.ui.screens
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,220 +16,131 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
-import com.fatalpuppet.volumex.security.KeystorePasswordManager
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
 import com.fatalpuppet.volumex.ui.theme.*
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Unlock screen for a FileVault-encrypted APFS volume. The secret is only used to derive the volume key
+ * in memory; it is never stored or sent anywhere.
+ */
 @Composable
 fun FileVaultUnlockScreen(
     volume: VolumeInfo,
-    onUnlock: (password: String, isRecoveryKey: Boolean) -> Boolean,
+    onUnlock: suspend (secret: String) -> Boolean,
     onSuccess: () -> Unit,
+    onEject: () -> Unit = {},
     onNavigateBack: () -> Unit = {}
 ) {
-    val context = LocalContext.current
-    var password by remember { mutableStateOf("") }
-    var isRecoveryKeyMode by remember { mutableStateOf(false) }
-    var showPassword by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var savePassword by remember { mutableStateOf(false) }
+    var secret by remember { mutableStateOf("") }
+    var recoveryMode by remember { mutableStateOf(false) }
+    var show by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
-    val pwManager = remember { KeystorePasswordManager(context) }
-
-    // Check for saved password
-    LaunchedEffect(volume.uuid) {
-        val saved = pwManager.getPassword(volume.uuid)
-        if (saved != null) password = saved
+    fun submit() {
+        if (secret.isBlank() || busy) return
+        busy = true; error = null
+        scope.launch {
+            val ok = onUnlock(secret.trim().let { if (recoveryMode) it else secret })
+            busy = false
+            if (ok) onSuccess() else error = if (recoveryMode) "That recovery key didn't unlock this drive." else "Wrong password. Try again."
+        }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(DeepNavy, DarkNavy, NavyMid)))
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(GlassWhite8)
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text("FileVault Unlock", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
+    Column(Modifier.fillMaxSize().background(DeepNavy)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onNavigateBack) { Icon(Icons.Default.ArrowBack, "Back to drive", tint = TextPrimary) }
+            Text("Back to drive", color = TextSecondary, fontSize = 14.sp)
+        }
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(28.dp))
+            Box(
+                Modifier.size(92.dp).clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(AccentBlue.copy(alpha = 0.30f), AccentBlue.copy(alpha = 0.08f))))
+                    .border(1.dp, GlassBorderFaint, RoundedCornerShape(28.dp)),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.Lock, null, tint = AccentBlue, modifier = Modifier.size(44.dp)) }
+            Spacer(Modifier.height(22.dp))
+            Text(volume.name.ifBlank { "Encrypted drive" }, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text("Encrypted with FileVault", color = TextTertiary, fontSize = 14.sp)
+            Spacer(Modifier.height(30.dp))
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // Lock icon
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Brush.verticalGradient(listOf(AccentOrange.copy(0.3f), AccentRed.copy(0.2f)))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Lock, null, tint = AccentOrange, modifier = Modifier.size(36.dp))
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                Text("Encrypted Volume", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = volume.name.ifEmpty { "Unknown Volume" },
-                    color = TextTertiary,
-                    fontSize = 14.sp
-                )
-
-                Spacer(Modifier.height(32.dp))
-
-                // Mode toggle
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(GlassWhite8)
-                        .padding(4.dp)
-                ) {
-                    ModeTab("Password", !isRecoveryKeyMode) { isRecoveryKeyMode = false; password = "" }
-                    ModeTab("Recovery Key", isRecoveryKeyMode) { isRecoveryKeyMode = true; password = "" }
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                // Input field
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it; errorMessage = null },
-                    label = { Text(if (isRecoveryKeyMode) "Recovery Key (Base32)" else "Password") },
-                    singleLine = !isRecoveryKeyMode,
-                    visualTransformation = if (showPassword || isRecoveryKeyMode) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = if (isRecoveryKeyMode) KeyboardType.Text else KeyboardType.Password),
-                    trailingIcon = {
-                        if (!isRecoveryKeyMode) {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    null, tint = TextTertiary
-                                )
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentBlue,
-                        unfocusedBorderColor = GlassBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentBlue,
-                        focusedLabelColor = AccentBlue,
-                        unfocusedLabelColor = TextTertiary
-                    )
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // Save password toggle
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = savePassword,
-                        onCheckedChange = { savePassword = it },
-                        colors = CheckboxDefaults.colors(checkedColor = AccentBlue, uncheckedColor = TextTertiary)
-                    )
-                    Text("Save password with biometrics", color = TextSecondary, fontSize = 13.sp)
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // Error message
-                AnimatedVisibility(visible = errorMessage != null) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = AccentRed,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                // Unlock button
-                Button(
-                    onClick = {
-                        isLoading = true
-                        errorMessage = null
-                        val success = onUnlock(password, isRecoveryKeyMode)
-                        isLoading = false
-                        if (success) {
-                            if (savePassword && volume.uuid.isNotEmpty()) {
-                                pwManager.savePassword(volume.uuid, password)
-                            }
-                            onSuccess()
-                        } else {
-                            errorMessage = if (isRecoveryKeyMode) "Invalid recovery key" else "Wrong password"
-                        }
-                    },
-                    enabled = password.isNotBlank() && !isLoading,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentBlue,
-                        disabledContainerColor = AccentBlueDim
-                    )
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            color = TextPrimary,
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Default.LockOpen, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Unlock Volume", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(
+                value = secret,
+                onValueChange = { secret = it; error = null },
+                label = { Text(if (recoveryMode) "Recovery key" else "Password") },
+                singleLine = true,
+                enabled = !busy,
+                isError = error != null,
+                visualTransformation = if (show || recoveryMode) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = if (recoveryMode) KeyboardType.Ascii else KeyboardType.Password, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { submit() }),
+                trailingIcon = {
+                    if (!recoveryMode) IconButton(onClick = { show = !show }) {
+                        Icon(if (show) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (show) "Hide password" else "Show password", tint = TextTertiary)
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentBlue, unfocusedBorderColor = GlassBorder, errorBorderColor = AccentRed,
+                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = AccentBlue,
+                    focusedLabelColor = AccentBlue, unfocusedLabelColor = TextTertiary
+                )
+            )
+            error?.let { Text(it, color = AccentRed, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp)) }
+            Spacer(Modifier.height(18.dp))
+
+            Button(
+                onClick = { submit() }, enabled = secret.isNotBlank() && !busy,
+                modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy, disabledContainerColor = AccentBlue.copy(alpha = 0.25f))
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp)); Text("Unlocking…", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                } else {
+                    Icon(Icons.Default.LockOpen, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                    Text("UNLOCK DRIVE", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 1.sp)
                 }
             }
+            TextButton(onClick = { recoveryMode = !recoveryMode; secret = ""; error = null }, enabled = !busy) {
+                Text(if (recoveryMode) "Use password instead" else "Use recovery key instead", color = AccentBlue, fontSize = 14.sp)
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(DarkSurface).padding(14.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(Icons.Default.Shield, null, tint = AccentGreen, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Your password never leaves this phone. It is used once to unlock the drive in memory and is not saved. The drive is opened read-only.",
+                    color = TextTertiary, fontSize = 12.sp, lineHeight = 17.sp
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            TextButton(onClick = onEject, enabled = !busy) {
+                Icon(Icons.Default.Eject, null, tint = TextSecondary, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
+                Text("Eject", color = TextSecondary, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
-
-@Composable
-private fun ModeTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) AccentBlue else androidx.compose.ui.graphics.Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-    ) {
-        Text(
-            text = label,
-            color = if (selected) TextPrimary else TextTertiary,
-            fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-        )
-    }
-}
-

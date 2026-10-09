@@ -30,7 +30,8 @@ fun DriveCard(
     writable: Boolean,
     onOpen: () -> Unit,
     onEject: () -> Unit,
-    onEnableWrite: (() -> Unit)? = null
+    onEnableWrite: (() -> Unit)? = null,
+    locked: Boolean = false
 ) {
     val accent = when (volume.type.uppercase()) {
         "APFS" -> Color(0xFF7BA7FF); "HFS+", "HFSX" -> Color(0xFF9B8CFF); "EXFAT" -> Color(0xFF4CD6A8); "FAT32" -> Color(0xFFFFB35C); else -> AccentBlue
@@ -50,8 +51,10 @@ fun DriveCard(
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Chip(volume.type.uppercase(), accent)
-                    Chip(if (writable) "READ & WRITE" else "READ ONLY", if (writable) AccentGreen else AccentOrange)
-                    if (volume.isEncrypted) Chip("ENCRYPTED", AccentRed)
+                    if (locked) Chip("LOCKED", AccentRed) else {
+                        Chip(if (writable) "READ & WRITE" else "READ ONLY", if (writable) AccentGreen else AccentOrange)
+                        if (volume.isEncrypted) Chip("FILEVAULT", AccentGreen)
+                    }
                 }
             }
         }
@@ -83,7 +86,7 @@ fun DriveCard(
             }
         } else Spacer(Modifier.height(12.dp))
 
-        if (!writable && onEnableWrite != null) {
+        if (!locked && !writable && onEnableWrite != null) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(AccentOrange.copy(alpha = 0.10f))
                     .clickable(onClick = onEnableWrite).padding(12.dp),
@@ -99,7 +102,10 @@ fun DriveCard(
             Button(
                 onClick = onOpen, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy)
-            ) { Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Open", fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
+            ) {
+                Icon(if (locked) Icons.Default.LockOpen else Icons.Default.FolderOpen, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (locked) "Unlock" else "Open", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            }
             OutlinedButton(
                 onClick = onEject, modifier = Modifier.height(48.dp), shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary), border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)

@@ -104,7 +104,8 @@ object ApfsContainerSuperblockParser {
             omapOid = omapOid,
             reaperOid = reaperOid,
             maxFileSystems = maxFileSystems,
-            fsOids = fsOids
+            fsOids = fsOids,
+            keylockerAddr = if (data.size >= 1312) buf.getLong(com.fatalpuppet.volumex.storage.crypto.ApfsCrypto.KEYLOCKER_OFFSET) else 0L
         )
     }
 }

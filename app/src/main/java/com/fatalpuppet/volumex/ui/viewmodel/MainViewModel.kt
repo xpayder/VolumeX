@@ -183,6 +183,19 @@ class MainViewModel : ViewModel() {
         Log.i(TAG, "Mounted ${parts.size} partition(s), ${volumes.size} volume(s), writable=$writable")
     }
 
+    /** Unlocks a FileVault volume (PBKDF2 is slow, so off the main thread). Refreshes the volume list on success. */
+    suspend fun unlockVolume(volumeIndex: Int, secret: String): Boolean = withContext(Dispatchers.IO) {
+        val state = _deviceState.value as? DeviceState.Connected ?: return@withContext false
+        val ok = try { state.reader.unlock(volumeIndex, secret) } catch (e: Exception) { Log.e(TAG, "unlock failed", e); false }
+        if (ok) {
+            val vols = state.reader.getVolumeInfos()
+            ActiveDriveSession.volumes = vols
+            _deviceState.value = state.copy(volumes = vols)
+            _statusMessage.value = "Unlocked ${vols.getOrNull(volumeIndex)?.name ?: "volume"}"
+        }
+        ok
+    }
+
     /** Flushes pending writes and releases the drive; afterwards it is safe to unplug. */
     fun eject() {
         viewModelScope.launch(Dispatchers.IO) {

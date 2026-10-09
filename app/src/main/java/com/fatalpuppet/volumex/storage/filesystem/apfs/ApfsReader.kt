@@ -48,7 +48,32 @@ class ApfsReader(
     private val volumes = HashMap<Int, Volume?>()
     private val stamps = HashMap<Int, Long>()
 
-    private fun parser(blockSize: Long) = ApfsBTreeParser(reader, partitionStartLba, blockSize)
+    private val xtsByVolume = HashMap<Int, com.fatalpuppet.volumex.storage.crypto.AesXts>()
+
+    private fun parser(blockSize: Long, volumeIndex: Int = -1) = ApfsBTreeParser(reader, partitionStartLba, blockSize, xtsByVolume[volumeIndex])
+
+    /** True if any volume of this container is FileVault-encrypted (the in-place writer cannot handle those). */
+    fun hasEncryptedVolume(): Boolean {
+        val sb = containerSb ?: return false
+        return sb.fsOids.filter { it != 0L }.indices.any { volumeSuperblock(it)?.isEncrypted == true }
+    }
+
+    override fun isLocked(volumeIndex: Int): Boolean =
+        volumeIndex !in xtsByVolume && volumeSuperblock(volumeIndex)?.isEncrypted == true
+
+    override fun unlock(volumeIndex: Int, secret: String): Boolean {
+        val sb = containerSb ?: return false
+        val volSb = volumeSuperblock(volumeIndex) ?: return false
+        if (!volSb.isEncrypted) return true
+        val plain = parser(sb.blockSize)
+        val keys = com.fatalpuppet.volumex.storage.crypto.ApfsCrypto.loadVolumeKeys(
+            { plain.readBlock(it) }, sb.containerUuid, sb.keylockerAddr, volSb.volUuid
+        ) ?: run { Log.w(TAG, "FileVault: no key material for volume $volumeIndex"); return false }
+        val vek = com.fatalpuppet.volumex.storage.crypto.ApfsCrypto.unlock(keys, secret) ?: return false
+        xtsByVolume[volumeIndex] = com.fatalpuppet.volumex.storage.crypto.AesXts(vek)
+        volumes.remove(volumeIndex)
+        return true
+    }
 
     override fun mount(): Boolean {
         val p0 = parser(4096L)
@@ -97,7 +122,7 @@ class ApfsReader(
 
     private fun loadVolume(index: Int): Volume? {
         val sb = containerSb ?: return null
-        val btree = parser(sb.blockSize)
+        val btree = parser(sb.blockSize, index)
         val omapData = btree.readBlock(sb.omapOid) ?: return null
         val containerOmap = ApfsOMapParser.parse(omapData) ?: return null
         val volOids = sb.fsOids.filter { it != 0L }
@@ -108,6 +133,14 @@ class ApfsReader(
         stamps[index] = volSb.lastModTime xor (volSb.nextObjId shl 7) xor (volSb.numFiles shl 21) xor volSb.numDirectories
         val volOmap = btree.readBlock(volSb.omapOid)?.let { ApfsOMapParser.parse(it) } ?: return null
         val xid = volSb.header.xid
+        if (volSb.isEncrypted && index !in xtsByVolume) {
+            // Locked FileVault volume: report it (name, size, counts live in the plain superblock) but expose no files.
+            val lockedInfo = VolumeInfo(
+                name = volSb.volumeName, type = "APFS", uuid = volSb.volUuidString, totalBlocks = sb.blockCount,
+                blockSize = sb.blockSize, isEncrypted = true, numFiles = volSb.numFiles, numDirectories = volSb.numDirectories
+            )
+            return Volume(lockedInfo, volSb, emptyMap(), emptyMap())
+        }
         val results = btree.scanFsTree(volSb.rootTreeOid) { oid -> btree.omapLookup(volOmap.treeOid, oid, xid) }
 
         val info = VolumeInfo(
@@ -135,7 +168,7 @@ class ApfsReader(
         return cur
     }
 
-    private fun toEntry(r: FsTreeResult, path: String) = FileSystemEntry(
+    private fun toEntry(r: FsTreeResult, path: String, volumeIndex: Int) = FileSystemEntry(
         name = r.name,
         path = if (path == "/" || path.isEmpty()) "/${r.name}" else "${path.trimEnd('/')}/${r.name}",
         isDirectory = r.inode.isDirectory,
@@ -144,13 +177,14 @@ class ApfsReader(
         modifiedAt = r.inode.modTimeMs,
         inodeOid = r.oid,
         parentOid = r.parentOid,
-        extents = r.extents
+        extents = r.extents,
+        volumeIndex = volumeIndex
     )
 
     override fun listDirectory(volumeIndex: Int, path: String): List<FileSystemEntry> {
         val vol = volume(volumeIndex) ?: return emptyList()
         val dirOid = resolvePathOid(vol, path) ?: return emptyList()
-        return (vol.byParent[dirOid] ?: emptyList()).map { toEntry(it, path) }
+        return (vol.byParent[dirOid] ?: emptyList()).map { toEntry(it, path, volumeIndex) }
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
     }
 
@@ -165,7 +199,7 @@ class ApfsReader(
     override fun readFileTo(entry: FileSystemEntry, out: OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
         val sb = containerSb ?: return false
         val bs = sb.blockSize.toInt()
-        val btree = parser(sb.blockSize)
+        val btree = parser(sb.blockSize, entry.volumeIndex)
         var pos = 0L
         val total = entry.size.coerceAtLeast(0L)
         val zeros = ByteArray(bs)
@@ -182,7 +216,7 @@ class ApfsReader(
                 if (extent.physBlockNum == 0L) {
                     out.write(zeros, 0, chunk)   // sparse extent
                 } else {
-                    val block = btree.readBlock(extent.physBlockNum + off / bs) ?: return false
+                    val block = btree.readDataBlock(extent.physBlockNum + off / bs) ?: return false
                     out.write(block, 0, chunk)
                 }
                 off += chunk; pos += chunk
@@ -198,7 +232,7 @@ class ApfsReader(
 
     override fun rootEntry(volumeIndex: Int): FileSystemEntry = FileSystemEntry(
         name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
-        inodeOid = ApfsConstants.ROOT_DIR_INO_NUM
+        inodeOid = ApfsConstants.ROOT_DIR_INO_NUM, volumeIndex = volumeIndex
     )
 
     override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
@@ -223,7 +257,8 @@ class ApfsReader(
                 val startByte = ext.physBlockNum * bs + inExt
                 val lba = partitionStartLba + startByte / 512
                 val sectors = ((startByte % 512).toInt() + n + 511) / 512
-                val data = reader.readSectors(lba, sectors) ?: return if (done > 0) done else -1
+                var data = reader.readSectors(lba, sectors) ?: return if (done > 0) done else -1
+                xtsByVolume[entry.volumeIndex]?.let { x -> data = x.decrypt(data, (partitionLbaRel(lba))) }
                 System.arraycopy(data, (startByte % 512).toInt(), buf, bufOff + done, n)
             }
             done += n; pos += n
@@ -231,8 +266,12 @@ class ApfsReader(
         return done
     }
 
+    /** Container-relative 512-byte sector index (the XTS tweak of the first sector read). */
+    private fun partitionLbaRel(lba: Long) = lba - partitionStartLba
+
     override fun unmount() {
         containerSb = null
         volumes.clear()
+        xtsByVolume.clear()
     }
 }

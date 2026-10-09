@@ -40,6 +40,18 @@ class CompositeReader(private val parts: List<FilesystemMounter.MountedPartition
     override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int =
         parts.getOrNull(entry.partitionId)?.reader?.readRange(entry, offset, buf, bufOff, len) ?: -1
 
+    override fun isLocked(volumeIndex: Int): Boolean {
+        val s = slot(volumeIndex) ?: return false
+        return parts[s.part].reader.isLocked(s.local)
+    }
+
+    override fun unlock(volumeIndex: Int, secret: String): Boolean {
+        val s = slot(volumeIndex) ?: return false
+        val ok = parts[s.part].reader.unlock(s.local, secret)
+        if (ok) refresh()
+        return ok
+    }
+
     override fun rootEntry(volumeIndex: Int): FileSystemEntry {
         val s = slot(volumeIndex) ?: return super.rootEntry(volumeIndex)
         return parts[s.part].reader.rootEntry(s.local).copy(partitionId = s.part)

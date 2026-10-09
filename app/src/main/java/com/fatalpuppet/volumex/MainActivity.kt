@@ -46,6 +46,7 @@ sealed class Screen {
     object Transfers : Screen()
     data class FilePreview(val entry: FileSystemEntry) : Screen()
     object Settings : Screen()
+    data class Unlock(val volumeIndex: Int) : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -116,8 +117,9 @@ class MainActivity : ComponentActivity() {
                             onBrowseVolume = { volumeInfo, idx ->
                                 val state = mainViewModel.deviceState.value
                                 if (state is com.fatalpuppet.volumex.ui.viewmodel.DeviceState.Connected) {
-                                    // If multiple volumes, show picker
-                                    if (state.volumes.size > 1) {
+                                    if (state.reader.isLocked(idx)) {
+                                        currentScreen = Screen.Unlock(idx)
+                                    } else if (state.volumes.size > 1) {
                                         currentScreen = Screen.VolumePicker
                                     } else {
                                         fileBrowserViewModel.setReader(state.reader, idx)
@@ -134,9 +136,26 @@ class MainActivity : ComponentActivity() {
                                 volumes = state.volumes,
                                 deviceName = state.deviceName,
                                 onSelectVolume = { _, idx ->
+                                    if (state.reader.isLocked(idx)) { currentScreen = Screen.Unlock(idx) } else {
                                     fileBrowserViewModel.setReader(state.reader, idx)
-                                    currentScreen = Screen.FileBrowser(idx)
+                                    currentScreen = Screen.FileBrowser(idx) }
                                 },
+                                onNavigateBack = { currentScreen = Screen.Home }
+                            )
+                        }
+                    }
+                    is Screen.Unlock -> {
+                        val state = mainViewModel.deviceState.value
+                        if (state is com.fatalpuppet.volumex.ui.viewmodel.DeviceState.Connected) {
+                            val vol = state.volumes.getOrNull(screen.volumeIndex)
+                            if (vol != null) FileVaultUnlockScreen(
+                                volume = vol,
+                                onUnlock = { secret -> mainViewModel.unlockVolume(screen.volumeIndex, secret) },
+                                onSuccess = {
+                                    fileBrowserViewModel.setReader(state.reader, screen.volumeIndex)
+                                    currentScreen = Screen.FileBrowser(screen.volumeIndex)
+                                },
+                                onEject = { mainViewModel.eject(); currentScreen = Screen.Home },
                                 onNavigateBack = { currentScreen = Screen.Home }
                             )
                         }

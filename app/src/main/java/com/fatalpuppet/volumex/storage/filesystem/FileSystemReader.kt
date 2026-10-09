@@ -58,6 +58,12 @@ interface FileSystemReader {
     fun rootEntry(volumeIndex: Int = 0): FileSystemEntry =
         FileSystemEntry(name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0)
 
+    /** True if the volume is encrypted and still needs [unlock] before it can be read. */
+    fun isLocked(volumeIndex: Int): Boolean = false
+
+    /** Unlocks an encrypted volume with a password / recovery key. Returns false if the secret is wrong. */
+    fun unlock(volumeIndex: Int, secret: String): Boolean = false
+
     /** Release resources. */
     fun unmount()
 }

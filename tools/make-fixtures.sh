@@ -43,6 +43,25 @@ make exfat ExFAT   VXEXFAT
 make fat32 "MS-DOS FAT32" VXFAT32
 make exfatbig ExFAT VXEXFBIG "$BIG_MB"
 
+# FileVault-encrypted APFS (throwaway password "secret123"), for the unlock tests.
+make_filevault() {
+  local img="$OUT/filevault.img"; rm -f "$img"; mkfile -n 160m "$img"
+  local dev; dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
+  diskutil eraseDisk APFS VXFV GPT "$dev" >/dev/null
+  printf 'Hello encrypted VolumeX\n' > /Volumes/VXFV/hello.txt
+  head -c 3000000 /dev/urandom > /Volumes/VXFV/big.bin
+  mkdir -p /Volumes/VXFV/docs; printf 'secret note\n' > /Volumes/VXFV/docs/note.txt
+  manifest /Volumes/VXFV "$OUT/filevault.manifest"
+  sync
+  diskutil apfs encryptVolume /Volumes/VXFV -user disk -passphrase secret123 >/dev/null
+  for i in $(seq 1 120); do
+    diskutil apfs list | grep -q "Conversion Status:.*Complete\|FileVault:  *Yes (Unlocked)" && ! diskutil apfs list | grep -q "Encrypting" && break; sleep 2
+  done
+  sync; diskutil unmountDisk force "$dev" >/dev/null; hdiutil detach "$dev" >/dev/null
+  echo "built $img"
+}
+make_filevault
+
 # Three-partition GPT disk (HFS+, APFS, exFAT), one marker file in each.
 make_multi() {
   local img="$OUT/multi.img"; rm -f "$img"; mkfile -n 400m "$img"
