@@ -3,7 +3,7 @@ package com.fatalpuppet.volumex.storage.filesystem
 import com.fatalpuppet.volumex.storage.filesystem.apfs.ApfsExtent
 
 enum class FileType {
-    IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, CODE, OTHER, DIRECTORY
+    IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, CODE, TEXT, PDF, OTHER, DIRECTORY
 }
 
 data class FileSystemEntry(
@@ -40,16 +40,26 @@ data class FileSystemEntry(
 
     val fileType: FileType get() = when {
         isDirectory -> FileType.DIRECTORY
-        extension in setOf("jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff", "svg") -> FileType.IMAGE
-        extension in setOf("mp4", "mov", "avi", "mkv", "m4v", "wmv", "flv", "webm", "3gp") -> FileType.VIDEO
-        extension in setOf("mp3", "aac", "flac", "wav", "m4a", "ogg", "opus", "wma") -> FileType.AUDIO
-        extension in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt", "md") -> FileType.DOCUMENT
-        extension in setOf("zip", "gz", "tar", "7z", "rar", "bz2", "xz", "dmg", "pkg", "iso") -> FileType.ARCHIVE
-        extension in setOf("kt", "java", "py", "js", "ts", "swift", "c", "cpp", "h", "rs", "go", "sh", "json", "xml", "yaml", "toml") -> FileType.CODE
+        extension in IMAGE_EXT -> FileType.IMAGE
+        extension in VIDEO_EXT -> FileType.VIDEO
+        extension in AUDIO_EXT -> FileType.AUDIO
+        extension == "pdf" -> FileType.PDF
+        extension in TEXT_EXT -> FileType.TEXT
+        extension in DOC_EXT -> FileType.DOCUMENT
+        extension in ARCHIVE_EXT -> FileType.ARCHIVE
+        extension in CODE_EXT -> FileType.CODE
         else -> FileType.OTHER
     }
 
     companion object {
+        val IMAGE_EXT = setOf("jpg", "jpeg", "jpe", "png", "gif", "webp", "heic", "heif", "bmp", "svg", "avif", "dng", "ico", "wbmp", "jfif")
+        val VIDEO_EXT = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "3g2", "mts", "m2ts", "mpg", "mpeg", "ogv", "flv", "wmv", "asf", "vob", "divx")
+        val AUDIO_EXT = setOf("mp3", "aac", "flac", "wav", "m4a", "ogg", "oga", "opus", "wma", "mka", "mid", "midi", "amr", "aif", "aiff", "ac3", "weba", "m4b", "caf")
+        val TEXT_EXT = setOf("txt", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "cfg", "properties", "html", "htm", "css", "srt", "vtt", "nfo", "tex", "plist", "gitignore", "env")
+        val DOC_EXT = setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "pages", "numbers", "key", "epub", "mobi")
+        val ARCHIVE_EXT = setOf("zip", "gz", "tgz", "tar", "7z", "rar", "bz2", "xz", "zst", "lz4", "cab", "dmg", "pkg", "iso", "jar", "apk", "aab", "deb", "rpm")
+        val CODE_EXT = setOf("kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "swift", "c", "cc", "cpp", "h", "hpp", "rs", "go", "sh", "bash", "zsh", "rb", "php", "cs", "sql", "gradle", "lua", "dart", "m", "mm", "pl", "r", "scala")
+
         fun formatBytes(bytes: Long): String = when {
             bytes < 0 -> "Unknown"
             bytes < 1024 -> "$bytes B"
