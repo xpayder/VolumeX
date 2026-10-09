@@ -63,15 +63,19 @@ class ExFatReader(
         } else {
             resolvePathCluster(path) ?: return emptyList()
         }
-        return listExFatDirectory(startCluster, path)
+        return if (path == "/" || path.isEmpty()) listExFatDirectory(startCluster, path)
+        else listExFatDirectory(startCluster, path, resolvedContiguous, resolvedLength)
     }
 
+    private var resolvedContiguous = false
+    private var resolvedLength = -1L
+
     override fun readFile(entry: FileSystemEntry): ByteArray? {
-        val b = boot ?: return null
+        boot ?: return null
         val startCluster = entry.inodeOid
-        if (startCluster < 2) return ByteArray(0)
-        val raw = readClusterChain(startCluster)
-        return if (entry.size > 0) raw.copyOf(entry.size.coerceAtMost(raw.size.toLong()).toInt()) else raw
+        if (startCluster < 2 || entry.size <= 0) return ByteArray(0)
+        val raw = readClusterChain(startCluster, entry.contiguous, entry.size)
+        return raw.copyOf(entry.size.coerceAtMost(raw.size.toLong()).toInt())
     }
 
     override fun unmount() { boot = null }
@@ -85,12 +89,18 @@ class ExFatReader(
         return partitionStartLba + b.clusterHeapOffset + (cluster - 2) * b.sectorsPerCluster
     }
 
-    fun readClusterChain(startCluster: Long): ByteArray {
+    /**
+     * Read a cluster chain. When [contiguous] (NoFatChain) the FAT is not used: the stream occupies
+     * ceil([length]/clusterSize) consecutive clusters starting at [startCluster].
+     */
+    fun readClusterChain(startCluster: Long, contiguous: Boolean = false, length: Long = -1L): ByteArray {
         val b = boot!!
         val chunks = mutableListOf<ByteArray>()
         var cluster = startCluster
         var safety = 0
-        while (cluster >= 2 && cluster < FAT_EOC && safety++ < 1_000_000) {
+        val contiguousCount = if (contiguous && length > 0) (length + b.bytesPerCluster - 1) / b.bytesPerCluster else 0L
+        while (cluster >= 2 && (contiguous || cluster < FAT_EOC) && safety++ < 1_000_000) {
+            if (contiguous && safety > contiguousCount) break
             val lba = clusterToLba(cluster)
             val clusterData = ByteArray(b.bytesPerCluster)
             for (s in 0 until b.sectorsPerCluster) {
@@ -98,7 +108,7 @@ class ExFatReader(
                 sd.copyInto(clusterData, s * b.bytesPerSector)
             }
             chunks.add(clusterData)
-            cluster = readFatEntry(cluster)
+            cluster = if (contiguous) cluster + 1 else readFatEntry(cluster)
         }
         val result = ByteArray(chunks.sumOf { it.size })
         var pos = 0
@@ -116,9 +126,23 @@ class ExFatReader(
         return buf.getInt(sectorOff).toLong() and 0xFFFFFFFFL
     }
 
-    private fun listExFatDirectory(startCluster: Long, parentPath: String): List<FileSystemEntry> {
-        val data = readClusterChain(startCluster)
+    private fun listExFatDirectory(startCluster: Long, parentPath: String, contiguous: Boolean = false, length: Long = -1L): List<FileSystemEntry> {
+        val data = readClusterChain(startCluster, contiguous, length)
         return parseExFatDirEntries(data, parentPath)
+    }
+
+    /** exFAT timestamp: 32-bit DOS date/time (year since 1980, 2-second resolution), treated as UTC. */
+    private fun dosToMillis(ts: Int): Long {
+        if (ts == 0) return 0L
+        val sec = (ts and 0x1F) * 2
+        val min = (ts ushr 5) and 0x3F
+        val hour = (ts ushr 11) and 0x1F
+        val day = (ts ushr 16) and 0x1F
+        val month = (ts ushr 21) and 0x0F
+        val year = ((ts ushr 25) and 0x7F) + 1980
+        if (day == 0 || month == 0) return 0L
+        return java.time.LocalDateTime.of(year, month.coerceIn(1, 12), day, hour.coerceIn(0, 23), min.coerceIn(0, 59), sec.coerceIn(0, 59))
+            .toEpochSecond(java.time.ZoneOffset.UTC) * 1000L
     }
 
     private fun parseExFatDirEntries(data: ByteArray, parentPath: String): List<FileSystemEntry> {
@@ -164,7 +188,8 @@ class ExFatReader(
                 val name = nameSb.toString().ifEmpty { "<unknown>" }
                 if (name == "." || name == "..") { i += 32 * (secondaryCount + 1); continue }
 
-                val modTime = 0L // TODO: parse timestamps from dir entry if needed
+                val createTime = dosToMillis(ByteBuffer.wrap(data, i + 8, 4).order(ByteOrder.LITTLE_ENDIAN).getInt())
+                val modTime = dosToMillis(ByteBuffer.wrap(data, i + 12, 4).order(ByteOrder.LITTLE_ENDIAN).getInt())
                 val entryPath = if (parentPath == "/") "/$name" else "$parentPath/$name"
 
                 entries.add(FileSystemEntry(
@@ -172,9 +197,11 @@ class ExFatReader(
                     path = entryPath,
                     isDirectory = isDir,
                     size = if (isDir) 0L else dataLength,
-                    createdAt = modTime,
+                    createdAt = createTime,
                     modifiedAt = modTime,
-                    inodeOid = firstCluster
+                    inodeOid = firstCluster,
+                    contiguous = (generalFlags and 0x02) != 0,
+                    allocLength = dataLength
                 ))
 
                 i += 32 * (secondaryCount + 1)
@@ -189,10 +216,14 @@ class ExFatReader(
         val b = boot ?: return null
         val parts = path.trim('/').split("/")
         var cluster = b.rootDirectoryCluster.toLong()
+        var contiguous = false
+        var length = -1L
         for (part in parts) {
-            val entries = listExFatDirectory(cluster, "")
-            cluster = entries.firstOrNull { it.name.equals(part, ignoreCase = true) }?.inodeOid ?: return null
+            val entries = listExFatDirectory(cluster, "", contiguous, length)
+            val e = entries.firstOrNull { it.name.equals(part, ignoreCase = true) && it.isDirectory } ?: return null
+            cluster = e.inodeOid; contiguous = e.contiguous; length = e.allocLength
         }
+        resolvedContiguous = contiguous; resolvedLength = length
         return cluster
     }
 

@@ -22,7 +22,10 @@ data class FileSystemEntry(
     val hfsParentId: Int = 0,
     // Folder details (populated on demand)
     val childCount: Int? = null,
-    val totalSize: Long? = null
+    val totalSize: Long? = null,
+    // exFAT: data is stored contiguously (NoFatChain flag) and the allocated length of the stream
+    val contiguous: Boolean = false,
+    val allocLength: Long = 0L
 ) {
     val extension: String get() {
         val dot = name.lastIndexOf('.')

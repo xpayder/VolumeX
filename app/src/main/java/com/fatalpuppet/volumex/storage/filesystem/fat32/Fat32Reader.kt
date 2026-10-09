@@ -99,7 +99,7 @@ class Fat32Reader(
         val chunks = mutableListOf<ByteArray>()
         var cluster = startCluster
         var safety = 0
-        while (cluster >= 2 && cluster < Fat32Constants.FAT32_EOC_MIN && safety++ < 100_000) {
+        while (cluster >= 2 && cluster < Fat32Constants.FAT32_EOC_MIN && safety++ < 0x0FFFFFF0) {
             val lba = clusterToLba(cluster)
             val clusterData = ByteArray(clusterSize)
             var offset = 0
@@ -189,8 +189,12 @@ class Fat32Reader(
     }
 
     private fun buildShortName(data: ByteArray, offset: Int): String {
-        val namePart = String(data, offset, 8).trimEnd()
-        val extPart = String(data, offset + 8, 3).trimEnd()
+        var namePart = String(data, offset, 8, Charsets.ISO_8859_1).trimEnd()
+        var extPart = String(data, offset + 8, 3, Charsets.ISO_8859_1).trimEnd()
+        // Byte 12 (NT reserved): bit 3 = base name is lower case, bit 4 = extension is lower case.
+        val ntRes = data[offset + 12].toInt()
+        if (ntRes and 0x08 != 0) namePart = namePart.lowercase()
+        if (ntRes and 0x10 != 0) extPart = extPart.lowercase()
         return if (extPart.isEmpty()) namePart else "$namePart.$extPart"
     }
 
