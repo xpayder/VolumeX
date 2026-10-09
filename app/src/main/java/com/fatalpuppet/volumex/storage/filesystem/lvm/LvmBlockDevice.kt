@@ -21,6 +21,10 @@ class LvmBlockDevice(
 
     private val totalExtents: Long = lv.segments.sumOf { it.extentCount }
 
+    override fun open(): Boolean = pv.open()
+    override fun close() = pv.close()
+    override fun isOpen(): Boolean = pv.isOpen()
+
     override fun sectorSize(): Int = pv.sectorSize()
 
     override fun sectorCount(): Long = totalExtents * extentSizeSectors

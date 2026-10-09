@@ -22,21 +22,23 @@ class BulkOnlyTransport(
             if (expectedLength > 0) {
                 val receiveResult = transport.receive(expectedLength)
                 if (!receiveResult.success) {
-                    Log.w(TAG, "Data receive failed, attempting recovery...")
+                    // Data-in STALL (device rejected the command): clear halt, then the
+                    // CSW follows and carries the failure status (USB MSC BOT 6.7.2).
+                    Log.w(TAG, "Data-in stalled, clearing halt and reading CSW")
                     transport.clearBulkInHalt()
-                    val retryResult = transport.receive(expectedLength)
-                    if (!retryResult.success) {
-                        return BulkOnlyResult(false, null, "DATA transfer failed after recovery")
-                    }
-                    data = retryResult.data
                 } else {
                     data = receiveResult.data
                 }
             }
 
-            val cswResult = transport.receive(13)
+            var cswResult = transport.receive(13)
             if (!cswResult.success) {
-                return BulkOnlyResult(false, null, "CSW receive failed")
+                // Second chance after a halt, then give up (caller may reset-recover).
+                transport.clearBulkInHalt()
+                cswResult = transport.receive(13)
+                if (!cswResult.success) {
+                    return BulkOnlyResult(false, null, "CSW receive failed")
+                }
             }
 
             val csw = cswResult.data ?: return BulkOnlyResult(false, null, "No CSW data")
@@ -90,6 +92,8 @@ class BulkOnlyTransport(
             return BulkOnlyResult(false, null, "Exception: ${e.message}")
         }
     }
+
+    fun resetRecovery(interfaceNumber: Int): Boolean = transport.resetRecovery(interfaceNumber)
 
     fun clearHalt(endpoint: android.hardware.usb.UsbEndpoint): Boolean {
         return transport.clearBulkInHalt()

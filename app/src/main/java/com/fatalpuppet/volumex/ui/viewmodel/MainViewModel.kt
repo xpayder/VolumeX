@@ -71,9 +71,23 @@ class MainViewModel : ViewModel() {
             withContext(Dispatchers.IO) {
                 try {
                     val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-                    val reader = UsbBlockDeviceReader(usbManager, device)
+                    // The attach broadcast can arrive while a USB 3 drive is still
+                    // re-enumerating, so the first transfers fail. Let it settle and
+                    // retry, re-resolving the device each time (its address may change).
+                    var reader: UsbBlockDeviceReader? = null
+                    for (attempt in 1..3) {
+                        kotlinx.coroutines.delay(if (attempt == 1) 1000L else 2000L)
+                        val current = usbManager.deviceList.values.firstOrNull {
+                            it.vendorId == device.vendorId && it.productId == device.productId
+                        } ?: break
+                        if (!usbManager.hasPermission(current)) break
+                        val candidate = UsbBlockDeviceReader(usbManager, current)
+                        if (candidate.open()) { reader = candidate; break }
+                        Log.w(TAG, "open() attempt $attempt failed")
+                        candidate.close()
+                    }
 
-                    if (!reader.open()) {
+                    if (reader == null) {
                         _deviceState.value = DeviceState.Error("Failed to open USB device")
                         _statusMessage.value = "Connection failed"
                         return@withContext

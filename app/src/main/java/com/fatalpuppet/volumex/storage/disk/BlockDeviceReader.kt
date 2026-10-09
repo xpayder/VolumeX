@@ -6,6 +6,7 @@ interface BlockDeviceReader {
     fun isOpen(): Boolean
     fun readSector(lba: Long): ByteArray?
     fun sectorSize(): Int
+    fun sectorCount(): Long = 0L
     fun writeSector(lba: Long, data: ByteArray): Boolean = false
     fun writeSectors(startLba: Long, data: ByteArray): Boolean {
         val ss = sectorSize()

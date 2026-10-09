@@ -139,7 +139,7 @@ class LuksDecryptor(private val blockDevice: BlockDeviceReader) {
         val jsonLen = (hdrSize - 4096).coerceIn(0L, 65536L).toInt()
         val jsonBytes = ByteArray(jsonLen)
         for (i in 0 until (jsonLen + 511) / 512) {
-            val s = blockDevice.readSector(8 + i) ?: break
+            val s = blockDevice.readSector(8L + i) ?: break
             val off = i * 512
             s.copyInto(jsonBytes, off.coerceAtMost(jsonLen - 1), 0, (jsonLen - off).coerceIn(0, 512))
         }
@@ -306,6 +306,10 @@ class LuksBlockDevice(
     companion object {
         private const val TAG = "VolumeX"
     }
+
+    override fun open(): Boolean = raw.open()
+    override fun close() = raw.close()
+    override fun isOpen(): Boolean = raw.isOpen()
 
     override fun sectorSize(): Int = raw.sectorSize()
 

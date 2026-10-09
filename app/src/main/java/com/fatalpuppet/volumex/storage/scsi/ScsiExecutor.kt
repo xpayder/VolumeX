@@ -18,6 +18,13 @@ class ScsiExecutor(
                 val cbwBytes = CommandBlockWrapperBuilder.build(cbw)
                 transport.execute(cbwBytes, expectedLength)
             }
+        if (!result.success && name != "REQUEST SENSE" && name != "TEST UNIT READY") {
+            val sense = requestSense().data
+            if (sense != null && sense.size >= 14) {
+                Log.w("VolumeX", "$name failed (${result.message}); sense key=0x%02X ASC=0x%02X ASCQ=0x%02X".format(
+                    sense[2].toInt() and 0x0F, sense[12].toInt() and 0xFF, sense[13].toInt() and 0xFF))
+            }
+        }
         return ScsiTransaction(
             command = name,
             success = result.success,
@@ -25,6 +32,20 @@ class ScsiExecutor(
             message = result.message,
             data = result.data
         )
+    }
+
+    /** REQUEST SENSE: clears a pending UNIT ATTENTION / reports why the last command failed. */
+    fun requestSense(): ScsiTransaction {
+        val command = ScsiCommand.requestSense(18)
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = 18,
+            flags = 0x80.toByte(),
+            lun = 0,
+            commandLength = command.size.toByte(),
+            command = command
+        )
+        return execute(name = "REQUEST SENSE", cbw = cbw, expectedLength = 18)
     }
 
     fun inquiry(): ScsiTransaction {

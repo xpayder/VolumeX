@@ -1,6 +1,7 @@
 package com.fatalpuppet.volumex.storage.crypto
 
 import javax.crypto.Cipher
+import kotlin.experimental.xor
 import javax.crypto.spec.SecretKeySpec
 
 /**

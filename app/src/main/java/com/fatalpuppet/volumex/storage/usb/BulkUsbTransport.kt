@@ -88,6 +88,21 @@ class BulkUsbTransport(
         )
     }
 
+    fun clearBulkOutHalt(): Boolean {
+        val r = connection.controlTransfer(0x02, 0x01, 0x00, bulkOut.address, null, 0, 1000)
+        Log.d(TAG, "CLEAR_FEATURE(HALT) OUT endpoint=0x%02X result=$r".format(bulkOut.address))
+        return r >= 0
+    }
+
+    /** Bulk-Only Mass Storage Reset + clear both halts (USB MSC BOT 5.3.4 reset recovery). */
+    fun resetRecovery(interfaceNumber: Int): Boolean {
+        val r = connection.controlTransfer(0x21, 0xFF, 0, interfaceNumber, null, 0, 2000)
+        Log.d(TAG, "BOT mass storage reset iface=$interfaceNumber result=$r")
+        clearBulkInHalt()
+        clearBulkOutHalt()
+        return r >= 0
+    }
+
     fun clearBulkInHalt(): Boolean {
         val result = connection.controlTransfer(
             0x02,       // USB request type: endpoint / host-to-device

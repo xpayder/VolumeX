@@ -8,6 +8,15 @@ object ScsiCommand {
     const val TEST_UNIT_READY = 0x00
     const val READ16 = 0x88
 
+    const val REQUEST_SENSE = 0x03
+
+    fun requestSense(allocationLength: Int = 18): ByteArray {
+        return byteArrayOf(
+            REQUEST_SENSE.toByte(),
+            0x00, 0x00, 0x00, allocationLength.toByte(), 0x00
+        )
+    }
+
     // Add the factory methods here
     fun testUnitReady(): ByteArray {
         return byteArrayOf(

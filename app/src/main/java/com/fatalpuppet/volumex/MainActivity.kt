@@ -12,6 +12,10 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +84,14 @@ class MainActivity : ComponentActivity() {
             VolumeXTheme {
                 var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
 
+                // targetSdk 36+ forces edge-to-edge: keep content clear of status/nav bars and the cutout.
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier
+                        .fillMaxSize()
+                        .background(com.fatalpuppet.volumex.ui.theme.DeepNavy)
+                        .safeDrawingPadding()
+                ) {
+
                 when (val screen = currentScreen) {
                     is Screen.Home -> {
                         HomeScreen(
@@ -142,13 +154,17 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+                }
             }
         }
 
         // Register USB permission receiver
         try {
             val filter = IntentFilter(ACTION_USB_PERMISSION)
-            registerReceiver(usbPermissionReceiver, filter)
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, usbPermissionReceiver, filter,
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register USB receiver", e)
         }

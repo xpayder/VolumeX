@@ -10,21 +10,7 @@ object ScsiRead10 {
         require(lba in 0..0xFFFFFFFFL)
         require(transferLength in 1..0xFFFF)
 
-        return byteArrayOf(
-            ScsiOpcodes.READ_10,
-
-            ((lba shr 24) and 0xFF).toByte(),
-            ((lba shr 16) and 0xFF).toByte(),
-            ((lba shr 8) and 0xFF).toByte(),
-            (lba and 0xFF).toByte(),
-
-            0,
-
-            ((transferLength shr 8) and 0xFF).toByte(),
-            (transferLength and 0xFF).toByte(),
-
-            0,
-            0
-        )
+        // READ(10) CDB: opcode, flags, LBA[4] (bytes 2-5), group, length[2] (bytes 7-8), control.
+        return ScsiCommand.read10(lba, transferLength)
     }
 }

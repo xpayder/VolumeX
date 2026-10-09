@@ -147,8 +147,8 @@ class Fat32Writer(
         buf.putInt(newVal.toInt())
         blockDevice.writeSector(fatSector, sector)
         // Write to second FAT if present
-        if (header.numFats >= 2) {
-            val fat2Sector = fatSector + header.sectorsPerFat
+        if (header.fatCount >= 2) {
+            val fat2Sector = fatSector + header.fatSize32
             val sector2 = blockDevice.readSector(fat2Sector)?.clone() ?: ByteArray(header.bytesPerSector.toInt())
             sector.copyInto(sector2)
             blockDevice.writeSector(fat2Sector, sector2)

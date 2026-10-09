@@ -35,6 +35,7 @@ class UsbBlockDeviceReader(
 
     companion object {
         private const val TAG = "VolumeX"
+        private const val ENABLE_UAS = false
     }
 
     // Add this function to the UsbBlockDeviceReader class
@@ -150,7 +151,8 @@ class UsbBlockDeviceReader(
         val uasInterface = interfaceScanner.findUasInterface(device)
         var useUas = false
 
-        if (uasInterface != null) {
+        // UAS transport is not wired into ScsiExecutor yet (only BOT is), so stay on BOT.
+        if (ENABLE_UAS && uasInterface != null) {
             Log.i(TAG, "UAS interface detected, attempting UAS...")
 
             // Try to claim UAS interface
@@ -203,7 +205,10 @@ class UsbBlockDeviceReader(
         connectionInfo = getConnectionInfo()
 
         // Initialize SCSI executor with BOT
-        scsiExecutor = ScsiExecutor(BulkOnlyTransport(transport!!))
+        val bot = BulkOnlyTransport(transport!!)
+        // Start from a known state even if a previous session left the drive mid-command.
+        bot.resetRecovery(storageInterface.usbInterface.id)
+        scsiExecutor = ScsiExecutor(bot)
 
         if (!runScsiChecks()) {
             Log.e(TAG, "SCSI checks failed")
@@ -268,11 +273,25 @@ class UsbBlockDeviceReader(
             command = testCommand
         )
 
-        val ready = executor.execute(
-            "TEST UNIT READY",
-            readyCbw,
-            0
-        )
+        // The first command after connecting commonly fails with UNIT ATTENTION
+        // (and a spun-down SSD/HDD may need a moment): read sense data and retry.
+        var ready = executor.execute("TEST UNIT READY", readyCbw, 0)
+        var attempt = 1
+        while (!ready.success && attempt < 10) {
+            ScsiDebug.transaction(ready)
+            val sense = executor.requestSense().data
+            if (sense != null && sense.size >= 14) {
+                Log.i(TAG, "TUR attempt $attempt failed, sense key=0x%02X ASC=0x%02X ASCQ=0x%02X".format(
+                    sense[2].toInt() and 0x0F, sense[12].toInt() and 0xFF, sense[13].toInt() and 0xFF))
+            }
+            Thread.sleep(300)
+            attempt++
+            ready = executor.execute(
+                "TEST UNIT READY",
+                readyCbw.copy(tag = CommandTagGenerator.next()),
+                0
+            )
+        }
 
         ScsiDebug.transaction(ready)
 

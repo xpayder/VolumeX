@@ -78,6 +78,14 @@ fun HomeScreen(
                             onBrowseVolume = onBrowseVolume
                         )
                     }
+                    is DeviceState.NeedsPassphrase -> {
+                        EmptyStateView(
+                            icon = Icons.Default.UsbOff,
+                            title = "Encrypted Volume",
+                            subtitle = state.hint,
+                            actionLabel = "Scan for Devices"
+                        )
+                    }
                     is DeviceState.Error -> {
                         EmptyStateView(
                             icon = Icons.Default.Error,
