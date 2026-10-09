@@ -39,6 +39,23 @@ class HfsPlusReader(
         return true
     }
 
+    private var seenWriteCount = -1L
+
+    /** Drops cached catalog data when the volume has been written to (writeCount in the volume header changed). */
+    private fun refreshIfChanged() {
+        val sector = reader.readSector(partitionStartLba + VOLUME_HEADER_SECTOR_OFFSET) ?: return
+        val wc = ((sector[68].toLong() and 0xFF) shl 24) or ((sector[69].toLong() and 0xFF) shl 16) or
+            ((sector[70].toLong() and 0xFF) shl 8) or (sector[71].toLong() and 0xFF)
+        if (seenWriteCount != -1L && wc != seenWriteCount) {
+            HfsPlusVolumeHeaderParser.parse(sector)?.let { vh ->
+                volumeHeader = vh
+                btreeParser = HfsPlusBTreeParser(reader, partitionStartLba, vh)
+                allEntries = emptyList()
+            }
+        }
+        seenWriteCount = wc
+    }
+
     override fun getVolumeInfos(): List<VolumeInfo> {
         val vh = volumeHeader ?: return emptyList()
         return listOf(VolumeInfo(
@@ -55,6 +72,7 @@ class HfsPlusReader(
     }
 
     override fun listDirectory(volumeIndex: Int, path: String): List<FileSystemEntry> {
+        refreshIfChanged()
         val vh = volumeHeader ?: return emptyList()
         val parser = btreeParser ?: return emptyList()
 
@@ -101,6 +119,7 @@ class HfsPlusReader(
     }
 
     override fun readFile(entry: FileSystemEntry): ByteArray? {
+        refreshIfChanged()
         val parser = btreeParser ?: return null
         // Find the catalog entry for this file
         val catalogEntry = allEntries.find {
@@ -112,6 +131,7 @@ class HfsPlusReader(
     }
 
     override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
+        refreshIfChanged()
         val parser = btreeParser ?: return false
         val catalogEntry = allEntries.find { it.catalogId == entry.hfsCatalogId && !it.isDirectory } ?: return false
         val fork = catalogEntry.dataFork ?: return true
