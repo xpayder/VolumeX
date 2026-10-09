@@ -124,4 +124,24 @@ class WriteFixtureTest(private val name: String) {
         }
         assertTrue("$name stress problems:\n" + failures.take(15).joinToString("\n"), failures.isEmpty())
     }
+
+    /** A file bigger than the first (initialised) chunk needs a bitmap for the next, never-used chunk. */
+    @Test fun large_file_spans_uninitialised_chunk() {
+        if (name != "apfs") return
+        val src = File(dir, "$name.img"); assumeTrue("fixture missing", src.exists())
+        val img = File(dir, "written-large-$name.img"); img.delete()
+        ProcessBuilder("cp", "-c", src.path, img.path).inheritIO().start().waitFor().also { if (it != 0) src.copyTo(img, overwrite = true) }
+        val dev = FileBlockDevice(img, true).also { it.open() }
+        val (reader, writer) = FilesystemMounter.mount(dev)!!
+        val size = 150L * 1024 * 1024
+        val rnd = Random(7); val md = MessageDigest.getInstance("SHA-256")
+        val data = ByteArray(size.toInt()).also { rnd.nextBytes(it) }; md.update(data)
+        assertTrue(writer!!.writeFileStream(root(reader), "large.bin", size, java.io.ByteArrayInputStream(data), null))
+        dev.flushCache(); dev.close()
+        File(dir, "written-large-$name.expect").writeText("${md.digest().joinToString("") { "%02x".format(it) }}\t$size\tlarge.bin\n")
+        val dev2 = FileBlockDevice(img, false).also { it.open() }
+        val (r2, _) = FilesystemMounter.mount(dev2)!!
+        val e = r2.listDirectory(0, "/").first { it.name == "large.bin" }
+        assertTrue(sha(r2.readFile(e)!!) == sha(data))
+    }
 }

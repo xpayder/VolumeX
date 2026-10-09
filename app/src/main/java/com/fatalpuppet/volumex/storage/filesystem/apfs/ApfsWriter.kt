@@ -466,8 +466,10 @@ class ApfsWriter(
             var c = 0L
             while (c < chunks && remaining > 0) {
                 val cib = blk(cibPaddr(c / chunksPerCib)); val o = chunkInfoOff(c)
-                val bitmapAddr = r64(cib, o + 24)
+                var bitmapAddr = r64(cib, o + 24)
                 val total = r32(cib, o + 16).toInt(); val free = r32(cib, o + 20)
+                // A chunk that was never used has no bitmap yet: claim a block of the internal pool for it.
+                if (bitmapAddr == 0L && free > 0) bitmapAddr = createChunkBitmap(cibPaddr(c / chunksPerCib), cib, o)
                 if (bitmapAddr != 0L && free > 0) {
                     val bm = blk(bitmapAddr); rawBlocks.add(bitmapAddr)
                     var i = 0
@@ -487,10 +489,35 @@ class ApfsWriter(
                 }
                 c++
             }
-            if (remaining > 0) throw Fail("not enough free space in initialised chunks (chunk bitmap creation is not supported)")
+            if (remaining > 0) throw Fail("not enough free space in initialised chunks")
             w64(sm, 72, r64(sm, 72) - want); touch(smPaddr)
             blocksAllocated += want
             return runs
+        }
+
+        /**
+         * Creates the (all-free) allocation bitmap of a chunk that has none, in a free block of the space
+         * manager's internal pool; the pool's own bitmap (current ring slot) is updated in place.
+         */
+        private fun createChunkBitmap(cibPaddr: Long, cib: ByteArray, infoOff: Int): Long {
+            val sm = smBlock()
+            val ipBlocks = r64(sm, 152); val bmSize = r32(sm, 160).toInt(); val ipBmBase = r64(sm, 168); val ipBase = r64(sm, 176)
+            val slot = r32(sm, r32(sm, 328).toInt()).toInt()
+            val bmBlocks = (0 until bmSize).map { ipBmBase + slot.toLong() * bmSize + it }
+            val maps = bmBlocks.map { blk(it) }
+            var found = -1L
+            for (i in 0 until ipBlocks) {
+                val m = maps[(i / 8 / bs).toInt()]; val bi = ((i / 8) % bs).toInt()
+                if ((m[bi].toInt() shr (i % 8).toInt()) and 1 == 0) { found = i; break }
+            }
+            if (found < 0) throw Fail("no free block in the internal pool for a new chunk bitmap")
+            val m = maps[(found / 8 / bs).toInt()]; val bi = ((found / 8) % bs).toInt()
+            m[bi] = (m[bi].toInt() or (1 shl (found % 8).toInt())).toByte()
+            rawBlocks.add(bmBlocks[(found / 8 / bs).toInt()]); touch(bmBlocks[(found / 8 / bs).toInt()])
+            val addr = ipBase + found
+            val bm = blk(addr); java.util.Arrays.fill(bm, 0.toByte()); rawBlocks.add(addr); touch(addr)
+            w64(cib, infoOff + 24, addr); w64(cib, infoOff, nxXid); touch(cibPaddr)
+            return addr
         }
 
         fun freeBlock(paddr: Long) = freeRun(paddr, 1)

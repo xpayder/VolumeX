@@ -18,15 +18,16 @@ mount, SHA-256 comparison).
 | **exFAT** | yes | yes | NoFatChain files, 128 KB clusters, 8 GB volume tested |
 | **FAT32** | yes | yes | long names, `~N` aliases, FSInfo |
 | **HFS+ / HFS+J** | yes | yes | catalog B-tree split/merge, attribute cleanup on delete; refuses unclean/journal-pending volumes |
-| **APFS** | yes | experimental | in-place editing (not copy-on-write); off by default (Settings > Experimental); needs an unencrypted volume with no snapshots and free space in already-initialised chunks |
+| **APFS** | yes | experimental | in-place editing (not copy-on-write); off by default (Settings > Experimental); needs an unencrypted volume with no snapshots; creates missing chunk bitmaps (verified with `fsck_apfs`, 150 MB file across chunks) |
 | ext2/3/4 | yes | no | read-only |
-| FileVault / LUKS / LVM | partial | no | unit-untested; treat as unverified |
+| FileVault (APFS) | yes (password or recovery key) | no | verified against a volume encrypted by macOS (`filevault.img`, tests in `FileVaultTest`); opened read-only |
+| LUKS / LVM | partial | no | unit-untested; treat as unverified |
 
 Write operations: add files (streamed), new folder, rename, delete (recursive). Multi-partition GPT/MBR
 drives are supported (EFI partition skipped).
 
 ### Known limits
-- APFS write cannot yet create the bitmap for a never-used chunk, so large writes to an almost empty drive fail cleanly.
+- APFS write is in-place (no copy-on-write): an unplugged cable mid-write can leave the volume needing `fsck_apfs`. Encrypted and snapshotted volumes stay read-only.
 - HFS+ write does not grow the catalog file and cannot delete files whose attributes or extents live in overflow structures.
 - 4Kn (4096-byte logical sector) drives are not supported; sector size is assumed to be 512.
 - A power loss while an APFS write is in progress can leave the drive needing repair on a Mac.
@@ -59,7 +60,7 @@ app/
 │   │   ├── AesXts               # Manual AES-XTS (GF(2^128) tweak advance)
 │   │   ├── ApfsKeyDerivation    # PBKDF2-HMAC-SHA256 KEK, base-32 recovery key decode
 │   │   ├── ApfsKeybag           # TLV keybag parser + RFC 3394 AES key unwrap
-│   │   └── FileVaultDecryptor   # High-level FileVault unlock
+│   │   └── ApfsCrypto           # FileVault keybag / PBKDF2 / key unwrap
 │   ├── disk/                    # BlockDeviceReader, DiskScanner, Partition
 │   ├── filesystem/
 │   │   ├── apfs/                # APFS container/volume superblock, OMAP, B-tree, reader

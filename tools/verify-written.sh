@@ -3,8 +3,8 @@
 # Usage: tools/verify-written.sh [fixturesdir]
 OUT="${1:-$(cd "$(dirname "$0")/.." && pwd)/app/build/fixtures}"
 rc=0
-for name in apfs hfs exfat exfatbig fat32 stress-apfs stress-hfs stress-exfat stress-fat32; do
-  kind="${name#stress-}"
+for name in apfs hfs exfat exfatbig fat32 large-apfs stress-apfs stress-hfs stress-exfat stress-fat32; do
+  kind="${name#*-}"
   img="$OUT/written-$name.img"; [ -f "$img" ] || { echo "[$name] no image"; continue; }
   if [ "$kind" = apfs ]; then
     dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
