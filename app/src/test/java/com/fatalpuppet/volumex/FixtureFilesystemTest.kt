@@ -46,7 +46,7 @@ class FixtureFilesystemTest(private val name: String, private val expectedType: 
         @Parameterized.Parameters(name = "{0}")
         fun params() = listOf(
             arrayOf("apfs", "APFS"), arrayOf("hfs", "HFS+"),
-            arrayOf("exfat", "exFAT"), arrayOf("fat32", "FAT32")
+            arrayOf("exfat", "exFAT"), arrayOf("exfatbig", "exFAT"), arrayOf("fat32", "FAT32")
         )
         private val dir = File(System.getProperty("fixtures.dir") ?: "build/fixtures")
     }
@@ -105,5 +105,24 @@ class FixtureFilesystemTest(private val name: String, private val expectedType: 
         assertNotNull(many)
         val n = r.listDirectory(0, many!!.path).count { it.name.startsWith("file_") }
         assertEquals(300, n)
+    }
+
+}
+
+/** A disk with HFS+, APFS and exFAT partitions must expose all three (GPT-driven probing). */
+class MultiPartitionTest {
+    @Test fun all_three_partitions_are_found_and_readable() {
+        val img = File(System.getProperty("fixtures.dir") ?: "build/fixtures", "multi.img")
+        assumeTrue("fixture missing", img.exists())
+        val dev = FileBlockDevice(img, false).also { it.open() }
+        val parts = FilesystemMounter.mountAll(dev)
+        val composite = com.fatalpuppet.volumex.storage.filesystem.CompositeReader(parts).also { it.mount() }
+        val types = composite.getVolumeInfos().map { it.type }.sorted()
+        assertEquals(listOf("APFS", "HFS+", "exFAT"), types)
+        for (i in composite.getVolumeInfos().indices) {
+            val marker = composite.listDirectory(i, "/").firstOrNull { it.name == "marker.txt" }
+            assertNotNull("volume $i (${composite.getVolumeInfos()[i].type}) has no marker.txt", marker)
+            assertTrue(String(composite.readFile(marker!!)!!).startsWith("marker MULTI"))
+        }
     }
 }

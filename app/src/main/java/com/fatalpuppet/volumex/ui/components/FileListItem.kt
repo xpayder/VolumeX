@@ -68,25 +68,12 @@ fun FileListItem(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!entry.isDirectory) {
-                    Text(
-                        text = entry.formattedSize,
-                        color = TextTertiary,
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = " · ",
-                        color = TextTertiary,
-                        fontSize = 12.sp
-                    )
-                }
-                Text(
-                    text = formatDate(entry.modifiedAt),
-                    color = TextTertiary,
-                    fontSize = 12.sp
-                )
-            }
+            val dateText = formatDate(entry.modifiedAt)
+            val meta = listOfNotNull(
+                if (entry.isDirectory) "Folder" else entry.formattedSize,
+                dateText.ifEmpty { null }
+            ).joinToString(" · ")
+            Text(text = meta, color = TextTertiary, fontSize = 12.sp)
         }
 
         // Chevron for directories
@@ -145,11 +132,11 @@ private fun getFileIconAndColor(entry: FileSystemEntry): Pair<ImageVector, Color
 }
 
 private fun formatDate(ms: Long): String {
-    if (ms <= 0) return "Unknown"
+    if (ms <= 0) return ""
     return try {
         val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
         sdf.format(Date(ms))
     } catch (e: Exception) {
-        "Unknown"
+        ""
     }
 }

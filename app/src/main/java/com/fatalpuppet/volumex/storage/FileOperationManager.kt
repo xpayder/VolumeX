@@ -49,6 +49,17 @@ class FileOperationManager(
 
     fun cancel() { cancelled = true }
 
+    private fun uniqueFile(dir: File, name: String): File {
+        var f = File(dir, name)
+        if (!f.exists()) return f
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var n = 1
+        while (f.exists()) { f = File(dir, "$base ($n)$ext"); n++ }
+        return f
+    }
+
     /**
      * Copy a file from the USB drive to Android Downloads folder.
      */
@@ -63,21 +74,21 @@ class FileOperationManager(
 
             if (cancelled) return@withContext TransferResult.Cancelled
 
-            val data = reader.readFile(entry)
-                ?: return@withContext TransferResult.Failure("Could not read file from drive")
-
-            if (cancelled) return@withContext TransferResult.Cancelled
-
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             downloadsDir.mkdirs()
+            val destFile = uniqueFile(downloadsDir, sanitizeFileName(entry.name))
 
-            val destFile = File(downloadsDir, sanitizeFileName(entry.name))
-            destFile.writeBytes(data)
+            val ok = java.io.BufferedOutputStream(java.io.FileOutputStream(destFile), 1 shl 20).use { out ->
+                reader.readFileTo(entry, out) { done ->
+                    if (!cancelled) onProgress(TransferProgress(entry.name, done, entry.size))
+                }
+            }
+            if (cancelled) { destFile.delete(); return@withContext TransferResult.Cancelled }
+            if (!ok) { destFile.delete(); return@withContext TransferResult.Failure("Could not read file from drive") }
 
-            onProgress(TransferProgress(entry.name, data.size.toLong(), entry.size, isComplete = true))
+            onProgress(TransferProgress(entry.name, entry.size, entry.size, isComplete = true))
             Log.i(TAG, "Copied ${entry.name} to ${destFile.absolutePath}")
-
-            TransferResult.Success(data.size.toLong())
+            TransferResult.Success(entry.size)
         } catch (e: Exception) {
             Log.e(TAG, "Error copying file to Android", e)
             TransferResult.Failure(e.message ?: "Unknown error")

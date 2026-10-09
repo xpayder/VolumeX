@@ -1,6 +1,8 @@
 package com.fatalpuppet.volumex.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -64,8 +66,31 @@ fun FileBrowserScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
 
+    val writable by viewModel.writable.collectAsState()
+    val message by viewModel.message.collectAsState()
+
     var showSortMenu by remember { mutableStateOf(false) }
     var searchActive by remember { mutableStateOf(false) }
+    var showFabMenu by remember { mutableStateOf(false) }
+    var showNewFolder by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<FileSystemEntry?>(null) }
+    var deleteTargets by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
+    var pendingCopy by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
+    val snackbarHost = remember { SnackbarHostState() }
+
+    LaunchedEffect(message) {
+        message?.let { snackbarHost.showSnackbar(it); viewModel.consumeMessage() }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) viewModel.importUris(context, uris)
+    }
+    // "Copy to phone": the user chooses the destination folder (Storage Access Framework).
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null && pendingCopy.isNotEmpty()) viewModel.copyToTree(context, uri, pendingCopy)
+        pendingCopy = emptyList()
+    }
+    fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; treeLauncher.launch(null) } }
 
     // Context menu state
     var contextMenuEntry by remember { mutableStateOf<FileSystemEntry?>(null) }
@@ -93,7 +118,9 @@ fun FileBrowserScreen(
                         onNavigateBack()
                     }
                 },
-                onCopySelected = { viewModel.copySelectedToAndroid(context) },
+                onCopySelected = { askDestination(viewModel.entriesByPaths(selectedEntries)) },
+                writable = writable,
+                onDeleteSelected = { deleteTargets = viewModel.entriesByPaths(selectedEntries) },
                 onClearSelection = { viewModel.clearSelection() },
                 onShowSortMenu = { showSortMenu = true },
                 onToggleViewMode = { viewModel.toggleViewMode() },
@@ -217,6 +244,45 @@ fun FileBrowserScreen(
             }
         }
 
+        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
+
+        if (writable && selectedEntries.isEmpty()) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(20.dp)) {
+                FloatingActionButton(onClick = { showFabMenu = true }, containerColor = AccentBlue, contentColor = TextPrimary) {
+                    Icon(Icons.Default.Add, "Add")
+                }
+                DropdownMenu(expanded = showFabMenu, onDismissRequest = { showFabMenu = false }, modifier = Modifier.background(DarkCard)) {
+                    DropdownMenuItem(
+                        text = { Text("Add files from phone", color = TextPrimary) },
+                        leadingIcon = { Icon(Icons.Default.UploadFile, null, tint = AccentBlue) },
+                        onClick = { showFabMenu = false; importLauncher.launch(arrayOf("*/*")) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("New folder", color = TextPrimary) },
+                        leadingIcon = { Icon(Icons.Default.CreateNewFolder, null, tint = AccentBlue) },
+                        onClick = { showFabMenu = false; showNewFolder = true }
+                    )
+                }
+            }
+        }
+
+        if (showNewFolder) {
+            TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
+        }
+        renameTarget?.let { t ->
+            TextInputDialog("Rename", t.name, "Rename", { renameTarget = null }) { viewModel.renameEntry(t, it); renameTarget = null }
+        }
+        if (deleteTargets.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { deleteTargets = emptyList() },
+                title = { Text("Delete ${deleteTargets.size} item${if (deleteTargets.size != 1) "s" else ""}?", color = TextPrimary) },
+                text = { Text("This permanently removes ${if (deleteTargets.size == 1) "\"${deleteTargets[0].name}\"" else "the selected items"} from the drive. It cannot be undone.", color = TextSecondary) },
+                confirmButton = { TextButton(onClick = { viewModel.deleteEntries(deleteTargets); deleteTargets = emptyList() }) { Text("Delete", color = AccentRed) } },
+                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } },
+                containerColor = DarkCard
+            )
+        }
+
         // Context menu
         contextMenuEntry?.let { entry ->
             EntryContextMenu(
@@ -244,9 +310,15 @@ fun FileBrowserScreen(
                 },
                 onCopyToPhone = {
                     contextMenuEntry = null
+                    askDestination(listOf(entry))
+                },
+                onCopyToDownloads = if (!entry.isDirectory) ({
+                    contextMenuEntry = null
                     viewModel.toggleSelection(entry)
                     viewModel.copySelectedToAndroid(context)
-                },
+                }) else null,
+                onRename = if (writable) ({ contextMenuEntry = null; renameTarget = entry }) else null,
+                onDelete = if (writable) ({ contextMenuEntry = null; deleteTargets = listOf(entry) }) else null,
                 onFolderDetails = if (entry.isDirectory) ({
                     contextMenuEntry = null
                     viewModel.getFolderDetails(entry)
@@ -386,6 +458,9 @@ private fun EntryContextMenu(
     onOpenWith: () -> Unit,
     onShare: () -> Unit,
     onCopyToPhone: () -> Unit,
+    onCopyToDownloads: (() -> Unit)?,
+    onRename: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
     onFolderDetails: (() -> Unit)?
 ) {
     AlertDialog(
@@ -399,7 +474,10 @@ private fun EntryContextMenu(
                     ContextMenuItem(Icons.Default.OpenInNew, "Open with", onOpenWith)
                     ContextMenuItem(Icons.Default.Share, "Share", onShare)
                 }
-                ContextMenuItem(Icons.Default.Download, "Copy to phone", onCopyToPhone)
+                ContextMenuItem(Icons.Default.Download, "Copy to phone…", onCopyToPhone)
+                if (onCopyToDownloads != null) ContextMenuItem(Icons.Default.FileDownload, "Copy to Downloads", onCopyToDownloads)
+                if (onRename != null) ContextMenuItem(Icons.Default.Edit, "Rename", onRename)
+                if (onDelete != null) ContextMenuItem(Icons.Default.Delete, "Delete", onDelete)
                 if (onFolderDetails != null) {
                     ContextMenuItem(Icons.Default.Info, "Folder details", onFolderDetails)
                 }
@@ -444,6 +522,8 @@ private fun FileBrowserTopBar(
     showHidden: Boolean,
     onNavigateBack: () -> Unit,
     onCopySelected: () -> Unit,
+    writable: Boolean,
+    onDeleteSelected: () -> Unit,
     onClearSelection: () -> Unit,
     onShowSortMenu: () -> Unit,
     onToggleViewMode: () -> Unit,
@@ -476,7 +556,10 @@ private fun FileBrowserTopBar(
 
             if (selectedCount > 0) {
                 IconButton(onClick = onCopySelected) {
-                    Icon(Icons.Default.Download, "Copy to Android", tint = AccentBlue)
+                    Icon(Icons.Default.Download, "Copy to phone", tint = AccentBlue)
+                }
+                if (writable) IconButton(onClick = onDeleteSelected) {
+                    Icon(Icons.Default.Delete, "Delete", tint = AccentRed)
                 }
                 IconButton(onClick = onClearSelection) {
                     Icon(Icons.Default.Close, "Clear", tint = TextSecondary)
@@ -549,4 +632,22 @@ private fun BreadcrumbChip(crumb: BreadcrumbItem, isLast: Boolean) {
 private fun getMimeType(entry: FileSystemEntry): String {
     val ext = entry.extension
     return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+}
+
+@Composable
+private fun TextInputDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, color = TextPrimary) },
+        text = {
+            OutlinedTextField(
+                value = text, onValueChange = { text = it }, singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+            )
+        },
+        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = AccentBlue) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } },
+        containerColor = DarkCard
+    )
 }

@@ -10,6 +10,7 @@ import com.fatalpuppet.volumex.storage.ActiveDriveSession
 import com.fatalpuppet.volumex.storage.crypto.LuksDecryptor
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemReader
+import com.fatalpuppet.volumex.storage.filesystem.CompositeReader
 import com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemWriter
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
@@ -134,13 +135,21 @@ class MainViewModel : ViewModel() {
     }
 
     private fun mountWithDevice(device: BlockDeviceReader, deviceName: String) {
-        val result = FilesystemMounter.mount(device)
-        if (result == null) {
+        val parts = FilesystemMounter.mountAll(device)
+        if (parts.isEmpty()) {
             _deviceState.value = DeviceState.Error("No supported filesystem found")
             _statusMessage.value = "Unsupported filesystem"
             return
         }
-        val (fsReader, fsWriter) = result
+        val fsReader: FileSystemReader
+        val fsWriter: FileSystemWriter?
+        if (parts.size == 1) {
+            fsReader = parts[0].reader
+            fsWriter = parts[0].writer
+        } else {
+            fsReader = CompositeReader(parts).also { it.mount() }
+            fsWriter = null   // chosen per volume in FileBrowserViewModel.setReader
+        }
         val volumes = fsReader.getVolumeInfos()
         ActiveDriveSession.reader = fsReader
         ActiveDriveSession.writer = fsWriter
@@ -151,8 +160,9 @@ class MainViewModel : ViewModel() {
             reader = fsReader,
             writer = fsWriter
         )
-        _statusMessage.value = "Connected: ${volumes.size} volume(s) found${if (fsWriter != null) " (writable)" else " (read-only)"}"
-        Log.i(TAG, "Mounted filesystem with ${volumes.size} volume(s) writable=${fsWriter != null}")
+        val writable = if (parts.size == 1) fsWriter != null else parts.any { it.writer != null }
+        _statusMessage.value = "Connected: ${volumes.size} volume(s) found${if (writable) " (writable)" else " (read-only)"}"
+        Log.i(TAG, "Mounted ${parts.size} partition(s), ${volumes.size} volume(s), writable=$writable")
     }
 
     fun disconnectDevice() {

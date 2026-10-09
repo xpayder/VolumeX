@@ -25,6 +25,8 @@ data class FileSystemEntry(
     val totalSize: Long? = null,
     // exFAT: data is stored contiguously (NoFatChain flag) and the allocated length of the stream
     val contiguous: Boolean = false,
+    // which mounted partition the entry belongs to (multi-partition drives)
+    val partitionId: Int = 0,
     val allocLength: Long = 0L
 ) {
     val extension: String get() {

@@ -1,6 +1,10 @@
 package com.fatalpuppet.volumex.ui.viewmodel
 
 import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import com.fatalpuppet.volumex.storage.ActiveDriveSession
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -44,6 +48,15 @@ class FileBrowserViewModel : ViewModel() {
     private val _transferProgress = MutableStateFlow<List<TransferProgress>>(emptyList())
     val transferProgress: StateFlow<List<TransferProgress>> = _transferProgress.asStateFlow()
 
+    private val _writable = MutableStateFlow(false)
+    /** True when the mounted filesystem supports writing (import, new folder, rename, delete). */
+    val writable: StateFlow<Boolean> = _writable.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    /** One-shot user-facing message (errors / confirmations) shown as a snackbar. */
+    val message: StateFlow<String?> = _message.asStateFlow()
+    fun consumeMessage() { _message.value = null }
+
     private var reader: FileSystemReader? = null
     private var currentVolumeIndex: Int = 0
     private var currentPath: String = "/"
@@ -73,6 +86,11 @@ class FileBrowserViewModel : ViewModel() {
     fun setReader(fsReader: FileSystemReader, volumeIndex: Int = 0) {
         reader = fsReader
         currentVolumeIndex = volumeIndex
+        if (fsReader is com.fatalpuppet.volumex.storage.filesystem.CompositeReader) {
+            ActiveDriveSession.writer = fsReader.writerFor(volumeIndex)
+        }
+        ActiveDriveSession.currentVolumeIndex = volumeIndex
+        _writable.value = ActiveDriveSession.writer != null
         navigateTo("/")
     }
 
@@ -197,6 +215,140 @@ class FileBrowserViewModel : ViewModel() {
         }
     }
 
+
+    // ── Write operations ──────────────────────────────────────────────────────
+
+    /** Directory entry for [path] (usable as a write parent), or null if it can't be resolved. */
+    private fun resolveDirEntry(path: String): FileSystemEntry? {
+        val r = reader ?: return null
+        var cur = r.rootEntry(currentVolumeIndex)
+        var p = "/"
+        for (part in path.trim('/').split('/').filter { it.isNotEmpty() }) {
+            cur = r.listDirectory(currentVolumeIndex, p).firstOrNull { it.name == part && it.isDirectory } ?: return null
+            p = cur.path
+        }
+        return cur
+    }
+
+    private fun updateProgress(list: MutableList<TransferProgress>, idx: Int, p: TransferProgress) {
+        list[idx] = p
+        _transferProgress.value = list.toList()
+    }
+
+    /** Copy files picked on the phone onto the current folder of the drive. */
+    fun importUris(context: Context, uris: List<Uri>) {
+        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val dest = currentPath
+        viewModelScope.launch(Dispatchers.IO) {
+            val parent = resolveDirEntry(dest) ?: run { _message.value = "Could not open the destination folder"; return@launch }
+            val resolver = context.contentResolver
+            val progresses = mutableListOf<TransferProgress>()
+            val infos = uris.map { u ->
+                var name = u.lastPathSegment?.substringAfterLast('/') ?: "file"
+                var size = -1L
+                resolver.query(u, null, null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        c.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let { name = c.getString(it) ?: name }
+                        c.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 }?.let { size = c.getLong(it) }
+                    }
+                }
+                Triple(u, name, size)
+            }
+            infos.forEach { progresses.add(TransferProgress(it.second, 0, it.third.coerceAtLeast(0))) }
+            _transferProgress.value = progresses.toList()
+            infos.forEachIndexed { idx, (uri, name, size0) ->
+                try {
+                    val size = if (size0 >= 0) size0 else resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                    if (size < 0) throw java.io.IOException("unknown file size")
+                    val ok = resolver.openInputStream(uri)?.use { input ->
+                        w.writeFileStream(parent, name, size, input) { done ->
+                            updateProgress(progresses, idx, TransferProgress(name, done, size))
+                        }
+                    } ?: false
+                    updateProgress(progresses, idx, if (ok) TransferProgress(name, size, size, isComplete = true)
+                        else TransferProgress(name, 0, size, isComplete = true, error = "Write failed (name exists, drive full or unsupported name)"))
+                } catch (e: Exception) {
+                    Log.e(TAG, "import failed: $name", e)
+                    updateProgress(progresses, idx, TransferProgress(name, 0, size0.coerceAtLeast(0), isComplete = true, error = e.message ?: "Error"))
+                }
+            }
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
+    fun createFolder(name: String) {
+        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val dest = currentPath
+        viewModelScope.launch(Dispatchers.IO) {
+            val parent = resolveDirEntry(dest)
+            val ok = parent != null && try { w.createDirectory(parent, name.trim()) } catch (e: Exception) { false }
+            _message.value = if (ok) "Folder created" else "Could not create folder (name exists or invalid)"
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
+    fun deleteEntries(entries: List<FileSystemEntry>) {
+        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        viewModelScope.launch(Dispatchers.IO) {
+            var failed = 0
+            for (e in entries) if (!(try { w.deleteEntry(e) } catch (x: Exception) { false })) failed++
+            _message.value = if (failed == 0) "Deleted ${entries.size} item${if (entries.size != 1) "s" else ""}" else "$failed item(s) could not be deleted"
+            _selectedEntries.value = emptySet()
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
+    fun renameEntry(entry: FileSystemEntry, newName: String) {
+        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = try { w.renameEntry(entry, newName.trim()) } catch (e: Exception) { false }
+            _message.value = if (ok) "Renamed" else "Could not rename (name exists or invalid)"
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
+    // ── Copy from the drive to a folder the user picks (Storage Access Framework) ──
+
+    fun entriesByPaths(paths: Set<String>): List<FileSystemEntry> = _entries.value.filter { it.path in paths }
+
+    fun copyToTree(context: Context, treeUri: Uri, items: List<FileSystemEntry>) {
+        val r = reader ?: return
+        val resolver = context.contentResolver
+        viewModelScope.launch(Dispatchers.IO) {
+            val rootDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+            val progresses = mutableListOf<TransferProgress>()
+            _transferProgress.value = emptyList()
+
+            fun copyOne(entry: FileSystemEntry, parentDoc: Uri) {
+                if (entry.isDirectory) {
+                    val dirDoc = DocumentsContract.createDocument(resolver, parentDoc, DocumentsContract.Document.MIME_TYPE_DIR, entry.name) ?: return
+                    r.listDirectory(currentVolumeIndex, entry.path).forEach { copyOne(it, dirDoc) }
+                    return
+                }
+                val idx = progresses.size
+                progresses.add(TransferProgress(entry.name, 0, entry.size))
+                _transferProgress.value = progresses.toList()
+                val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(entry.extension) ?: "application/octet-stream"
+                try {
+                    val doc = DocumentsContract.createDocument(resolver, parentDoc, mime, entry.name)
+                        ?: throw java.io.IOException("cannot create file in the chosen folder")
+                    val ok = resolver.openOutputStream(doc)?.use { out ->
+                        val buffered = java.io.BufferedOutputStream(out, 1 shl 20)
+                        val done = r.readFileTo(entry, buffered) { n -> updateProgress(progresses, idx, TransferProgress(entry.name, n, entry.size)) }
+                        buffered.flush(); done
+                    } ?: false
+                    updateProgress(progresses, idx, if (ok) TransferProgress(entry.name, entry.size, entry.size, isComplete = true)
+                        else TransferProgress(entry.name, 0, entry.size, isComplete = true, error = "Could not read file from the drive"))
+                } catch (e: Exception) {
+                    Log.e(TAG, "copyToTree failed: ${entry.name}", e)
+                    updateProgress(progresses, idx, TransferProgress(entry.name, 0, entry.size, isComplete = true, error = e.message ?: "Error"))
+                }
+            }
+            items.forEach { copyOne(it, rootDoc) }
+            _selectedEntries.value = emptySet()
+        }
+    }
+
     private fun loadDirectory(path: String) {
         val fsReader = reader ?: run {
             _statusMessage.value = "No filesystem mounted"
@@ -219,7 +371,8 @@ class FileBrowserViewModel : ViewModel() {
             if (result != null) {
                 val filtered = if (_showHidden.value) result else result.filter { !it.name.startsWith(".") }
                 _entries.value = sortEntries(filtered, _sortBy.value)
-                _statusMessage.value = "${filtered.size} item${if (filtered.size != 1) "s" else ""}"
+                _statusMessage.value = "${filtered.size} item${if (filtered.size != 1) "s" else ""}" +
+                    if (_writable.value) "" else " · read-only"
             } else {
                 _entries.value = emptyList()
                 _statusMessage.value = "Error loading directory"

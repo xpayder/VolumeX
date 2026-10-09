@@ -21,7 +21,7 @@ class WriteFixtureTest(private val name: String) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
-        fun params() = listOf("hfs", "exfat", "fat32")
+        fun params() = listOf("hfs", "exfat", "exfatbig", "fat32")
         private val dir = File(System.getProperty("fixtures.dir") ?: "build/fixtures")
     }
 
@@ -29,13 +29,14 @@ class WriteFixtureTest(private val name: String) {
 
     private fun root(r: com.fatalpuppet.volumex.storage.filesystem.FileSystemReader): FileSystemEntry = when (name) {
         "hfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, hfsCatalogId = 2)
-        "exfat" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatReader).getBootSector()!!.rootDirectoryCluster.toLong())
+        "exfat", "exfatbig" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatReader).getBootSector()!!.rootDirectoryCluster.toLong())
         else -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.fat32.Fat32Reader).getVolumeHeader()!!.rootCluster)
     }
 
     @Test fun write_operations_succeed_and_are_recorded() {
         val src = File(dir, "$name.img"); assumeTrue("fixture missing", src.exists())
-        val img = File(dir, "written-$name.img"); src.copyTo(img, overwrite = true)
+        val img = File(dir, "written-$name.img"); img.delete()
+        ProcessBuilder("cp", "-c", src.path, img.path).inheritIO().start().waitFor().also { if (it != 0) src.copyTo(img, overwrite = true) }
         val dev = FileBlockDevice(img, true).also { it.open() }
         val (reader, writer) = FilesystemMounter.mount(dev)!!
         assertTrue("$name: writer not available", writer != null)

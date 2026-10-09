@@ -6,6 +6,7 @@ set -euo pipefail
 OUT="${1:-$(cd "$(dirname "$0")/.." && pwd)/app/build/fixtures}"
 mkdir -p "$OUT"
 SIZE_MB=${SIZE_MB:-256}
+BIG_MB=${BIG_MB:-8192}
 
 populate() {  # $1 = mountpoint
   local m="$1"
@@ -24,9 +25,9 @@ manifest() {  # $1 = mountpoint, $2 = out
     done ) > "$2"
 }
 
-make() {  # $1 = name, $2 = diskutil format, $3 = volume name
+make() {  # $1 = name, $2 = diskutil format, $3 = volume name, $4 = size in MB (optional)
   local img="$OUT/$1.img"
-  rm -f "$img"; mkfile -n ${SIZE_MB}m "$img"
+  rm -f "$img"; mkfile -n ${4:-$SIZE_MB}m "$img"
   local dev; dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
   diskutil eraseDisk "$2" "$3" GPT "$dev" >/dev/null
   local mnt="/Volumes/$3"
@@ -40,3 +41,15 @@ make apfs  APFS    VXAPFS
 make hfs   JHFS+   VXHFS
 make exfat ExFAT   VXEXFAT
 make fat32 "MS-DOS FAT32" VXFAT32
+make exfatbig ExFAT VXEXFBIG "$BIG_MB"
+
+# Three-partition GPT disk (HFS+, APFS, exFAT), one marker file in each.
+make_multi() {
+  local img="$OUT/multi.img"; rm -f "$img"; mkfile -n 400m "$img"
+  local dev; dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
+  diskutil partitionDisk "$dev" GPT JHFS+ MULTIHFS 100m APFS MULTIAPFS 100m ExFAT MULTIEXFAT R >/dev/null
+  for v in MULTIHFS MULTIAPFS MULTIEXFAT; do printf 'marker %s\n' "$v" > "/Volumes/$v/marker.txt"; done
+  sync; diskutil unmountDisk "$dev" >/dev/null; hdiutil detach "$dev" >/dev/null
+  echo "built $img"
+}
+make_multi

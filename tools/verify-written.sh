@@ -3,7 +3,7 @@
 # Usage: tools/verify-written.sh [fixturesdir]
 OUT="${1:-$(cd "$(dirname "$0")/.." && pwd)/app/build/fixtures}"
 rc=0
-for name in hfs exfat fat32; do
+for name in hfs exfat exfatbig fat32; do
   img="$OUT/written-$name.img"; [ -f "$img" ] || { echo "[$name] no image"; continue; }
   dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
   part=$(diskutil list "$dev" | awk '/Apple_HFS|Microsoft Basic Data|DOS_FAT_32|Windows_FAT_32|Apple_APFS|EXFAT|Microsoft/ && !/EFI/ {print $NF; exit}')
@@ -11,7 +11,7 @@ for name in hfs exfat fat32; do
   echo "== $name ($dev, /dev/$part)"
   case $name in
     hfs)   fsck_hfs -n "/dev/$part" 2>&1 | tail -4 ;;
-    exfat) fsck_exfat -n "/dev/$part" 2>&1 | tail -4 ;;
+    exfat|exfatbig) fsck_exfat -n "/dev/$part" 2>&1 | tail -4 ;;
     fat32) fsck_msdos -n "/dev/$part" 2>&1 | tail -4 ;;
   esac
   [ ${PIPESTATUS[0]} -ne 0 ] && { echo "[$name] FSCK FAILED"; rc=1; }
