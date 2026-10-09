@@ -36,7 +36,7 @@ class HfsPlusBTreeParser(
         val blockSize = volumeHeader.blockSize.toLong()
         val sectorSize = reader.sectorSize().toLong()
         val sectorsPerBlock = blockSize / sectorSize
-        val lba = partitionStartLba + blockNum * sectorsPerBlock
+        val lba = partitionStartLba + blockNum.toLong() * sectorsPerBlock
         val result = ByteArray(blockSize.toInt())
         for (i in 0 until sectorsPerBlock) {
             val sector = reader.readSector(lba + i) ?: return null
@@ -45,28 +45,45 @@ class HfsPlusBTreeParser(
         return result
     }
 
-    /** Read a B-tree node by its node number. */
-    fun readNode(nodeNum: Int): ByteArray? {
-        val catalogStartBlock = volumeHeader.catalogFile.extents.firstOrNull()?.startBlock ?: return null
-        if (catalogStartBlock == 0) return null
-
-        // Each B-tree node is nodeSize bytes. A single HFS+ block may contain multiple nodes
-        // or a node may span multiple blocks if nodeSize > blockSize.
-        val blockSize = volumeHeader.blockSize
-        val nodesPerBlock = blockSize / nodeSize
-        val blockIdx = if (nodesPerBlock > 0) nodeNum / nodesPerBlock else nodeNum
-        val nodeOffsetInBlock = (nodeNum % maxOf(nodesPerBlock, 1)) * nodeSize
-
-        // Walk the catalog fork extents to find the right block
-        val absoluteBlock = catalogStartBlock + blockIdx
-        val blockData = readBlock(absoluteBlock) ?: return null
-
-        if (nodeOffsetInBlock + nodeSize > blockData.size) return null
-        return blockData.copyOfRange(nodeOffsetInBlock, nodeOffsetInBlock + nodeSize)
+    /**
+     * Read [length] bytes at byte [offset] of a fork, following its extent list
+     * (the first 8 extents from the catalog record / volume header).
+     */
+    fun readForkBytes(fork: HfsPlusForkData, offset: Long, length: Int): ByteArray? {
+        val blockSize = volumeHeader.blockSize.toLong()
+        val out = ByteArray(length)
+        var done = 0
+        var pos = offset
+        while (done < length) {
+            val fileBlock = pos / blockSize
+            val inBlock = (pos % blockSize).toInt()
+            // locate the extent holding fileBlock
+            var acc = 0L
+            var physical = -1L
+            for (ext in fork.extents) {
+                if (ext.blockCount == 0) continue
+                if (fileBlock < acc + ext.blockCount) { physical = ext.startBlock.toLong() + (fileBlock - acc); break }
+                acc += ext.blockCount
+            }
+            if (physical < 0) return null
+            val block = readBlock(physical.toInt()) ?: return null
+            val n = minOf(length - done, (blockSize - inBlock).toInt())
+            System.arraycopy(block, inBlock, out, done, n)
+            done += n; pos += n
+        }
+        return out
     }
+
+    /** Read a B-tree node by its node number (node N lives at byte N*nodeSize of the catalog file). */
+    fun readNode(nodeNum: Int): ByteArray? =
+        readForkBytes(volumeHeader.catalogFile, nodeNum.toLong() * nodeSize, nodeSize)
 
     /** Initialize the B-tree header. Must be called before scanning. */
     fun initialize(): Boolean {
+        // Bootstrap: the node size is stored in the header record of node 0, so read 512 bytes first.
+        val probe = readForkBytes(volumeHeader.catalogFile, 0, 512) ?: return false
+        val probeHdr = HfsPlusBTreeNode.parseHeaderRec(probe, 14)
+        nodeSize = probeHdr.nodeSize.toInt().and(0xFFFF).coerceAtLeast(512)
         val node0Data = readNode(0) ?: return false
         val desc = HfsPlusBTreeNode.parseDescriptor(node0Data)
         if (!desc.isHeader) {
@@ -206,25 +223,30 @@ class HfsPlusBTreeParser(
         return HfsPlusForkData(logicalSize, clumpSize, totalBlocks, extents)
     }
 
+    /** Stream a file's data fork (logicalSize bytes) to [out]. */
+    fun readForkTo(fork: HfsPlusForkData, out: java.io.OutputStream, onProgress: ((Long) -> Unit)? = null): Boolean {
+        val blockSize = volumeHeader.blockSize
+        var remaining = fork.logicalSize
+        var total = 0L
+        for (ext in fork.extents) {
+            if (remaining <= 0) break
+            for (b in 0 until ext.blockCount) {
+                if (remaining <= 0) break
+                val block = readBlock(ext.startBlock + b) ?: return false
+                val n = minOf(blockSize.toLong(), remaining).toInt()
+                out.write(block, 0, n)
+                remaining -= n; total += n
+                onProgress?.invoke(total)
+            }
+        }
+        return remaining <= 0
+    }
+
     /** Read the full content of a file's data fork. */
     fun readFileFork(fork: HfsPlusForkData): ByteArray? {
         if (fork.logicalSize <= 0) return ByteArray(0)
-        val size = fork.logicalSize.coerceAtMost(100 * 1024 * 1024L).toInt()
-        val result = ByteArray(size)
-        var written = 0
-
-        for (ext in fork.extents) {
-            if (ext.blockCount == 0) continue
-            if (written >= size) break
-            for (b in 0 until ext.blockCount) {
-                if (written >= size) break
-                val blockData = readBlock(ext.startBlock + b) ?: break
-                val toCopy = minOf(volumeHeader.blockSize, size - written)
-                System.arraycopy(blockData, 0, result, written, toCopy)
-                written += toCopy
-            }
-        }
-
-        return result.copyOf(written)
+        if (fork.logicalSize > Int.MAX_VALUE - 8) return null
+        val out = java.io.ByteArrayOutputStream(fork.logicalSize.toInt())
+        return if (readForkTo(fork, out)) out.toByteArray() else null
     }
 }

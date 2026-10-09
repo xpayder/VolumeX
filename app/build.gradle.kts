@@ -37,6 +37,8 @@ android {
             all {
                 it.systemProperty("fixtures.dir", layout.buildDirectory.dir("fixtures").get().asFile.path)
                 it.maxHeapSize = "2g"
+                if (project.hasProperty("vxlog")) it.systemProperty("vx.log", "1")
+                it.testLogging.showStandardStreams = project.hasProperty("vxlog")
                 it.testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
             }
         }

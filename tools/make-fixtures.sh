@@ -39,4 +39,4 @@ make() {  # $1 = name, $2 = diskutil format, $3 = volume name
 make apfs  APFS    VXAPFS
 make hfs   JHFS+   VXHFS
 make exfat ExFAT   VXEXFAT
-make fat32 MS-DOS  VXFAT32
+make fat32 "MS-DOS FAT32" VXFAT32

@@ -101,7 +101,7 @@ data class HfsPlusBTreeNode(
             val nameLength = buf.getShort().toInt().and(0xFFFF)
             if (nameLength > 255 || data.size - offset - 8 < nameLength * 2) return null
             val nameChars = CharArray(nameLength) { buf.getShort().toInt().and(0xFFFF).toChar() }
-            val name = String(nameChars)
+            val name = java.text.Normalizer.normalize(String(nameChars), java.text.Normalizer.Form.NFC)
             return HfsPlusCatalogKey(keyLength, parentID, name)
         }
     }
