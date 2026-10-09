@@ -1,10 +1,5 @@
 package com.fatalpuppet.volumex.storage.usb
 
-import android.hardware.usb.UsbEndpoint
-import com.fatalpuppet.volumex.storage.scsi.CommandStatusWrapperParser
-import com.fatalpuppet.volumex.storage.scsi.ScsiResponseValidator
-import com.fatalpuppet.volumex.storage.scsi.ScsiResult
-
 import android.util.Log
 
 class BulkOnlyTransport(
@@ -14,25 +9,21 @@ class BulkOnlyTransport(
         private const val TAG = "VolumeX"
     }
 
+    /** DATA IN: send CBW, receive data, receive CSW. */
     fun execute(cbw: ByteArray, expectedLength: Int): BulkOnlyResult {
         try {
-            // Send CBW
             Log.d(TAG, "Sending CBW: ${cbw.size} bytes")
             val sendResult = transport.send(cbw)
             if (!sendResult.success) {
                 return BulkOnlyResult(false, null, "CBW send failed")
             }
 
-            // Receive data (if expectedLength > 0)
             var data: ByteArray? = null
             if (expectedLength > 0) {
                 val receiveResult = transport.receive(expectedLength)
                 if (!receiveResult.success) {
-                    // Try to recover: clear halt on IN endpoint
                     Log.w(TAG, "Data receive failed, attempting recovery...")
-                    transport.clearHalt(transport.bulkIn)
-
-                    // Try once more
+                    transport.clearBulkInHalt()
                     val retryResult = transport.receive(expectedLength)
                     if (!retryResult.success) {
                         return BulkOnlyResult(false, null, "DATA transfer failed after recovery")
@@ -43,16 +34,13 @@ class BulkOnlyTransport(
                 }
             }
 
-            // Receive CSW (13 bytes)
             val cswResult = transport.receive(13)
             if (!cswResult.success) {
                 return BulkOnlyResult(false, null, "CSW receive failed")
             }
 
-            // Parse CSW to check status
             val csw = cswResult.data ?: return BulkOnlyResult(false, null, "No CSW data")
-            val status = csw[12] // Status is at byte 12
-
+            val status = csw[12]
             Log.d(TAG, "CSW status: $status")
 
             if (status != 0x00.toByte()) {
@@ -67,16 +55,44 @@ class BulkOnlyTransport(
         }
     }
 
-    // Add this function to BulkUsbTransport.kt
-    fun clearHalt(endpoint: UsbEndpoint): Boolean {
-        return try {
-            val result = connection?.clearHalt(endpoint) ?: false
-            Log.d(TAG, "CLEAR_FEATURE(HALT) on endpoint ${endpoint.address} result=$result")
-            result
+    /** DATA OUT: send CBW, send dataOut, receive CSW. */
+    fun executeDataOut(cbw: ByteArray, dataOut: ByteArray): BulkOnlyResult {
+        try {
+            Log.d(TAG, "Sending WRITE CBW: ${cbw.size} bytes")
+            val sendCbw = transport.send(cbw)
+            if (!sendCbw.success) {
+                return BulkOnlyResult(false, null, "WRITE CBW send failed")
+            }
+
+            Log.d(TAG, "Sending data OUT: ${dataOut.size} bytes")
+            val sendData = transport.send(dataOut)
+            if (!sendData.success) {
+                return BulkOnlyResult(false, null, "WRITE data send failed")
+            }
+
+            val cswResult = transport.receive(13)
+            if (!cswResult.success) {
+                return BulkOnlyResult(false, null, "WRITE CSW receive failed")
+            }
+
+            val csw = cswResult.data ?: return BulkOnlyResult(false, null, "No WRITE CSW data")
+            val status = csw[12]
+            Log.d(TAG, "WRITE CSW status: $status")
+
+            return if (status == 0x00.toByte()) {
+                BulkOnlyResult(true, null, "WRITE OK")
+            } else {
+                BulkOnlyResult(false, null, "WRITE CSW status = $status")
+            }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Clear halt failed", e)
-            false
+            Log.e(TAG, "BOT executeDataOut exception", e)
+            return BulkOnlyResult(false, null, "Exception: ${e.message}")
         }
+    }
+
+    fun clearHalt(endpoint: android.hardware.usb.UsbEndpoint): Boolean {
+        return transport.clearBulkInHalt()
     }
 }
 
@@ -85,46 +101,6 @@ data class BulkOnlyResult(
     val data: ByteArray?,
     val message: String
 ) {
-    // In BulkUsbTransport.kt, update the send function
-    fun send(data: ByteArray): BulkTransferResult {
-        try {
-            val result = connection?.bulkTransfer(bulkOut, data, data.size, TIMEOUT_MS)
-            Log.d(TAG, "USB OUT: endpoint=${bulkOut.address} maxPacket=${bulkOut.maxPacketSize} requested=${data.size} result=$result")
-
-            return if (result != null && result >= 0) {
-                BulkTransferResult(true, "Sent $result bytes")
-            } else {
-                BulkTransferResult(false, "Transfer failed with result: $result")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "USB OUT exception", e)
-            return BulkTransferResult(false, "Exception: ${e.message}")
-        }
-    }
-
-    // Update receive function
-    fun receive(length: Int): BulkTransferResult {
-        try {
-            val buffer = ByteArray(length)
-            val result = connection?.bulkTransfer(bulkIn, buffer, length, TIMEOUT_MS)
-            Log.d(TAG, "USB IN: endpoint=${bulkIn.address} maxPacket=${bulkIn.maxPacketSize} requested=$length result=$result")
-
-            return if (result != null && result >= 0) {
-                if (result < length) {
-                    // Truncate to actual received size
-                    BulkTransferResult(true, buffer.copyOf(result))
-                } else {
-                    BulkTransferResult(true, buffer)
-                }
-            } else {
-                BulkTransferResult(false, "Transfer failed with result: $result")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "USB IN exception", e)
-            return BulkTransferResult(false, "Exception: ${e.message}")
-        }
-    }
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false

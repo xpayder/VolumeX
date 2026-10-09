@@ -11,7 +11,8 @@ data class ExFatBootSector(
     val bytesPerSectorShift: Int,
     val sectorsPerClusterShift: Int,
     val numberOfFats: Int,
-    val volumeSerialNumber: Long
+    val volumeSerialNumber: Long,
+    val partitionStartLba: Long = 0L
 ) {
     val bytesPerSector: Int
         get() = 1 shl bytesPerSectorShift

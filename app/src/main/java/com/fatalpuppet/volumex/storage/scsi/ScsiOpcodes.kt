@@ -12,4 +12,8 @@ object ScsiOpcodes {
 
     const val READ_10: Byte = 0x28
 
+    const val WRITE_10: Byte = 0x2A
+
+    const val SYNCHRONIZE_CACHE: Byte = 0x35.toByte()
+
 }

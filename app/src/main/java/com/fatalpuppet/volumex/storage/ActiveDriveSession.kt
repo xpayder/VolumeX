@@ -1,6 +1,7 @@
 package com.fatalpuppet.volumex.storage
 
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemReader
+import com.fatalpuppet.volumex.storage.filesystem.FileSystemWriter
 import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
 
 /**
@@ -9,12 +10,14 @@ import com.fatalpuppet.volumex.storage.filesystem.VolumeInfo
  */
 object ActiveDriveSession {
     @Volatile var reader: FileSystemReader? = null
+    @Volatile var writer: FileSystemWriter? = null
     @Volatile var currentVolumeIndex: Int = 0
     @Volatile var volumes: List<VolumeInfo> = emptyList()
     @Volatile var currentPath: String = "/"
 
     fun clear() {
         reader = null
+        writer = null
         currentVolumeIndex = 0
         volumes = emptyList()
         currentPath = "/"

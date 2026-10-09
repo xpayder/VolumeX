@@ -686,17 +686,35 @@ class UsbBlockDeviceReader(
         claimed = false
     }
 
-    override fun readSector(
-        lba: Long
-    ): ByteArray? {
+    override fun readSector(lba: Long): ByteArray? {
         val executor = scsiExecutor ?: return null
-
-        return executor.read10(
-            lba = lba,
-            blockCount = 1,
-            blockSize = sectorSize()
-        ).data
+        return executor.read10(lba = lba, blockCount = 1, blockSize = sectorSize()).data
     }
+
+    override fun writeSector(lba: Long, data: ByteArray): Boolean {
+        val executor = scsiExecutor ?: return false
+        val result = executor.write10(lba = lba, data = data, blockSize = sectorSize())
+        return result.success
+    }
+
+    override fun flushCache(): Boolean {
+        val executor = scsiExecutor ?: return false
+        val command = byteArrayOf(
+            com.fatalpuppet.volumex.storage.scsi.ScsiOpcodes.SYNCHRONIZE_CACHE,
+            0, 0, 0, 0, 0, 0, 0, 0, 0
+        )
+        val cbw = com.fatalpuppet.volumex.storage.scsi.CommandBlockWrapper(
+            tag = com.fatalpuppet.volumex.storage.scsi.CommandTagGenerator.next(),
+            dataTransferLength = 0,
+            flags = 0x00.toByte(),
+            lun = 0,
+            commandLength = command.size.toByte(),
+            command = command
+        )
+        val result = executor.execute("SYNCHRONIZE CACHE", cbw, 0)
+        return result.success
+    }
+
     override fun sectorSize(): Int = 512
 
 

@@ -19,6 +19,8 @@ class Fat32Reader(
 
     private var header: Fat32VolumeHeader? = null
 
+    fun getVolumeHeader(): Fat32VolumeHeader? = header
+
     override fun mount(): Boolean {
         val sector = blockDevice.readSector(partitionStartLba) ?: run {
             Log.e(TAG, "FAT32: failed to read boot sector at LBA $partitionStartLba")

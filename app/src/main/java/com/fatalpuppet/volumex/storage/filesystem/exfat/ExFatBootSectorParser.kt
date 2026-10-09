@@ -82,7 +82,8 @@ object ExFatBootSectorParser {
             bytesPerSectorShift = bytesPerSectorShift,
             sectorsPerClusterShift = sectorsPerClusterShift,
             numberOfFats = numberOfFats,
-            volumeSerialNumber = volumeSerialNumber
+            volumeSerialNumber = volumeSerialNumber,
+            partitionStartLba = partitionStartLba
         )
     }
 }

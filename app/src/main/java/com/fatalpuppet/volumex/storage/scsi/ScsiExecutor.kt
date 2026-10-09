@@ -102,4 +102,41 @@ class ScsiExecutor(
             expectedLength = transferLength
         )
     }
+
+    fun write10(lba: Long, data: ByteArray, blockSize: Int): ScsiTransaction {
+        val blockCount = data.size / blockSize
+        val command = byteArrayOf(
+            ScsiOpcodes.WRITE_10,
+            0x00,
+            ((lba shr 24) and 0xFF).toByte(),
+            ((lba shr 16) and 0xFF).toByte(),
+            ((lba shr 8) and 0xFF).toByte(),
+            (lba and 0xFF).toByte(),
+            0x00,
+            ((blockCount shr 8) and 0xFF).toByte(),
+            (blockCount and 0xFF).toByte(),
+            0x00
+        )
+
+        val cbw = CommandBlockWrapper(
+            tag = CommandTagGenerator.next(),
+            dataTransferLength = data.size,
+            flags = 0x00.toByte(), // DATA OUT
+            lun = 0,
+            commandLength = command.size.toByte(),
+            command = command
+        )
+
+        val cbwBytes = CommandBlockWrapperBuilder.build(cbw)
+        val (result, elapsed) = TransactionTimer.measure {
+            transport.executeDataOut(cbwBytes, data)
+        }
+        return ScsiTransaction(
+            command = "WRITE(10) LBA $lba",
+            success = result.success,
+            elapsedMs = elapsed,
+            message = result.message,
+            data = null
+        )
+    }
 }
