@@ -34,6 +34,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.fatalpuppet.volumex.provider.DriveFileProvider
@@ -109,12 +114,16 @@ fun FileBrowserScreen(
         }
     }
 
+    val hazeState = rememberHazeState()
+    var headerPx by remember { mutableIntStateOf(0) }
+    val headerDp = with(LocalDensity.current) { headerPx.toDp() }
+
     Box(Modifier.fillMaxSize().background(DeepNavy)) {
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.align(Alignment.TopCenter).zIndex(1f).onSizeChanged { headerPx = it.height }) {
             // ── header card ──────────────────────────────────────────────────
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(20.dp)).background(DarkSurface).border(1.dp, GlassBorderFaint, RoundedCornerShape(20.dp))
+                    .liquidGlass(hazeState, RoundedCornerShape(24.dp))
             ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
@@ -183,19 +192,21 @@ fun FileBrowserScreen(
                 transferProgress.takeLast(3).forEach { TransferProgressCard(progress = it, onCancel = { viewModel.clearTransferProgress() }) }
             }
 
+        }
+        Box(Modifier.fillMaxSize().hazeSource(hazeState)) {
             val display = if (searchActive && searchQuery.isNotBlank()) searchResults else visible
             when {
-                isLoading || (searchActive && isSearching) -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }
+                isLoading || (searchActive && isSearching) -> Box(Modifier.fillMaxSize().padding(top = headerDp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }
                 display.isEmpty() -> EmptyFolderView(path = if (searchActive) "No results for \"$searchQuery\"" else (breadcrumbs.lastOrNull()?.path ?: "/"))
                 viewMode == ViewMode.GRID -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(104.dp), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 120.dp),
+                    columns = GridCells.Adaptive(104.dp), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()
                 ) {
                     items(display, key = { it.path }) { e ->
                         GridCell(e, selected.contains(e.path), { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, { viewModel.toggleSelection(e) }, { sheetEntry = e })
                     }
                 }
-                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     items(display, key = { it.path }) { e ->
                         FileListItem(entry = e, isSelected = selected.contains(e.path), onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
                     }
@@ -208,8 +219,7 @@ fun FileBrowserScreen(
         // ── floating action pill ─────────────────────────────────────────────
         if (writable && selected.isEmpty() && !searchActive) {
             Row(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).shadow(12.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-                    .background(DarkCard).border(1.dp, GlassBorder, RoundedCornerShape(28.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).liquidGlass(hazeState, RoundedCornerShape(28.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 if (clipboard != null) {
