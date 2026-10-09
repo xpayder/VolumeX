@@ -79,6 +79,8 @@ class MainActivity : ComponentActivity() {
         Log.i(TAG, "VolumeX MainActivity starting")
 
         transferViewModel.initialize(this)
+        com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite =
+            getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("apfs_write", false)
 
         setContent {
             VolumeXTheme {

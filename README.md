@@ -6,54 +6,38 @@ VolumeX is a free, open-source Android app that reads (and writes) Apple APFS an
 
 ---
 
-## Features
+## Filesystem support (verified on macOS-made images)
 
-### Filesystem support
+Every row below is checked by automated tests that build real disk images with the macOS tools
+(`tools/make-fixtures.sh`), run the app's own mount/read/write code on them, and then let macOS
+judge the result (`tools/verify-written.sh`: `fsck_apfs` / `fsck_hfs -f` / `fsck_exfat` / `fsck_msdos`,
+mount, SHA-256 comparison).
 
 | Format | Read | Write | Notes |
-|--------|------|-------|-------|
-| **APFS** | ✅ | ⚠️ planned | Full B-tree traversal, OMAP resolution, extents |
-| **HFS+** | ✅ | ⚠️ planned | Catalog B-tree, fork data, linked-list leaf scan |
-| **exFAT** | ✅ | ✅ | Boot sector parsed; full file access |
-| **FAT32** | ✅ | ✅ | Cluster chains, LFN long-filename entries |
-| **ext2/3/4** | ✅ | — | Extent tree + block-map inodes, dir entries |
-| **FileVault** | ✅ | ✅ | AES-XTS, PBKDF2 password + recovery-key paths |
-| **LUKS1/2** | ⏳ | — | Planned |
-| **LVM** | ⏳ | — | Linear volumes planned |
-| **NTFS** | — | — | Out of scope (see separate apps) |
+|--------|:----:|:-----:|-------|
+| **exFAT** | yes | yes | NoFatChain files, 128 KB clusters, 8 GB volume tested |
+| **FAT32** | yes | yes | long names, `~N` aliases, FSInfo |
+| **HFS+ / HFS+J** | yes | yes | catalog B-tree split/merge, attribute cleanup on delete; refuses unclean/journal-pending volumes |
+| **APFS** | yes | experimental | in-place editing (not copy-on-write); off by default (Settings > Experimental); needs an unencrypted volume with no snapshots and free space in already-initialised chunks |
+| ext2/3/4 | yes | no | read-only |
+| FileVault / LUKS / LVM | partial | no | unit-untested; treat as unverified |
 
-### File manager
+Write operations: add files (streamed), new folder, rename, delete (recursive). Multi-partition GPT/MBR
+drives are supported (EFI partition skipped).
 
-- Browse, search, and sort (name / size / date)
-- Grid view (photo thumbnails) and list view
-- Toggle hidden files (`.` prefix)
-- Folder details: recursive item count and total size
-- Multi-partition drives: volume picker screen when >1 volume detected
-- Drives larger than 2 TB supported
+### Known limits
+- APFS write cannot yet create the bitmap for a never-used chunk, so large writes to an almost empty drive fail cleanly.
+- HFS+ write does not grow the catalog file and cannot delete files whose attributes or extents live in overflow structures.
+- 4Kn (4096-byte logical sector) drives are not supported; sector size is assumed to be 512.
+- A power loss while an APFS write is in progress can leave the drive needing repair on a Mac.
 
-### File operations
-
-- **Copy to phone** — streaming copy to Android Downloads with live progress, speed, and ETA
-- **Copy to drive** — import files from phone storage to APFS / HFS+ / FAT32 / exFAT
-- **Delete / rename / mkdir** on supported filesystems
-- Non-blocking transfers run as a Foreground Service — browse while copying
-- Atomic writes: an unplugged drive mid-write is recoverable via Mac's fsck
-
-### Preview & sharing
-
-- **Image preview** — full-screen Coil AsyncImage directly off the drive (no copy needed)
-- **Audio preview** — Android MediaPlayer via pipe-streaming ContentProvider
-- **Video preview** — Android MediaPlayer via pipe-streaming ContentProvider
-- **"Open with"** — fires `ACTION_VIEW` with a drive-backed content URI
-- **Share** — fires `ACTION_SEND` so any app can receive a file from the drive
-- **Android file picker integration** — DriveDocumentsProvider makes the drive appear in Gmail, Drive, WhatsApp, etc.
-
-### Security
-
-- FileVault: password unlock and personal recovery-key unlock
-- Saved passwords encrypted with AES-256-GCM in Android Keystore
-- Biometric (fingerprint / face) protection for saved passwords
-- No analytics, no ads, no crash-reporting SDKs, no trackers
+### Test it yourself
+```
+tools/make-fixtures.sh          # builds app/build/fixtures/*.img with macOS tools
+./gradlew :app:testDebugUnitTest
+tools/verify-written.sh         # asks macOS (fsck + mount + hashes) about every written image
+tools/phone-image.sh push|open|import|pull   # run the debug app on a phone against an image
+```
 
 ---
 
@@ -98,45 +82,6 @@ app/
     ├── components/               # GlassCard, FileListItem, DeviceVolumeCard, ...
     └── theme/                    # Liquid Glass palette (deep navy + frosted glass)
 ```
-
----
-
-## Status
-
-### Implemented ✅
-
-- USB OTG host detection and permission handling
-- USB Mass Storage Bulk-Only Transport (BOT) and UAS transport
-- SCSI: TEST UNIT READY, INQUIRY, READ CAPACITY(10), READ(10)
-- MBR and GPT partition table detection and parsing
-- APFS: container superblock (NXSB), object map (OMAP), volume superblock (APSB),
-  B-tree traversal (fixed and variable K/V), inode records, directory entries, extents
-- HFS+: volume header, catalog B-tree leaf scan, file/folder records, fork data
-- FAT32: boot sector, FAT cluster chain, LFN long-filename entries
-- ext2/3/4: superblock, block group descriptors, extent-tree and block-map inodes, dir entries
-- FileVault: AES-XTS-128/256 decryption, PBKDF2-HMAC-SHA256 key derivation, keybag TLV,
-  RFC 3394 key unwrap, password and recovery-key unlock paths
-- File copy from drive to Android Downloads (streaming, with progress)
-- File copy from Android to drive
-- Liquid Glass UI: dark navy palette, frosted glass cards, breadcrumb navigation
-- Search, sort, grid/list toggle, hidden files toggle, folder details
-- Multi-partition volume picker
-- ContentProvider for "Open With" / Share without copying
-- DocumentsProvider for Android file picker integration
-- Image preview directly off the drive (Coil)
-- Audio and video preview via MediaPlayer
-- Android Keystore password storage with biometric unlock
-- Non-blocking Foreground Service transfers
-- Settings screen
-
-### Planned / In Progress ⏳
-
-- APFS write (create, rename, delete): requires COW B-tree mutations,
-  space-manager allocation, and checkpointing — complex, in progress
-- HFS+ write: allocation bitmap, catalog B-tree insertion, journal updates — in progress
-- LUKS1/2 encrypted volumes
-- LVM linear volumes
-- exFAT full file-manager integration (reader exists, write pending)
 
 ---
 

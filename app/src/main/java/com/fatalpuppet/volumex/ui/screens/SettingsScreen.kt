@@ -68,6 +68,34 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
+                    val prefs = remember { context.getSharedPreferences("vx_prefs", android.content.Context.MODE_PRIVATE) }
+                    var apfsWrite by remember { mutableStateOf(prefs.getBoolean("apfs_write", false)) }
+                    var confirmApfs by remember { mutableStateOf(false) }
+                    SettingsSection(title = "Experimental") {
+                        SettingsToggleRow(
+                            icon = Icons.Default.Warning,
+                            title = "Write to APFS drives",
+                            subtitle = "Edits the drive in place (not copy-on-write). Checked against macOS fsck_apfs, but a power loss or unplugging during a write can leave the drive needing repair on a Mac. Keep a backup. Applies the next time you connect a drive.",
+                            checked = apfsWrite,
+                            onToggle = { if (apfsWrite) { apfsWrite = false; prefs.edit().putBoolean("apfs_write", false).apply(); com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite = false } else confirmApfs = true }
+                        )
+                    }
+                    if (confirmApfs) {
+                        AlertDialog(
+                            onDismissRequest = { confirmApfs = false },
+                            title = { Text("Enable APFS writing?", color = TextPrimary) },
+                            text = { Text("This is experimental. Only use it on drives whose contents you have backed up, and never unplug the drive while a transfer is running.", color = TextSecondary) },
+                            confirmButton = { TextButton(onClick = {
+                                apfsWrite = true; confirmApfs = false
+                                prefs.edit().putBoolean("apfs_write", true).apply()
+                                com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite = true
+                            }) { Text("Enable", color = AccentBlue) } },
+                            dismissButton = { TextButton(onClick = { confirmApfs = false }) { Text("Cancel", color = TextTertiary) } },
+                            containerColor = DarkCard
+                        )
+                    }
+                }
+                item {
                     SettingsSection(title = "File Browser") {
                         SettingsToggleRow(
                             icon = Icons.Default.VisibilityOff,
