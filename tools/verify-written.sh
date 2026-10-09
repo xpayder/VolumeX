@@ -10,7 +10,7 @@ for name in hfs exfat exfatbig fat32; do
   [ -z "$part" ] && part="${dev#/dev/}s1"
   echo "== $name ($dev, /dev/$part)"
   case $name in
-    hfs)   fsck_hfs -n "/dev/$part" 2>&1 | tail -4 ;;
+    hfs)   fsck_hfs -fn "/dev/$part" 2>&1 | tail -8 ;;
     exfat|exfatbig) fsck_exfat -n "/dev/$part" 2>&1 | tail -4 ;;
     fat32) fsck_msdos -n "/dev/$part" 2>&1 | tail -4 ;;
   esac
