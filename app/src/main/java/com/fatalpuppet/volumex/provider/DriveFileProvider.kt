@@ -46,43 +46,31 @@ class DriveFileProvider : ContentProvider() {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
     }
 
+    private val proxyThread by lazy { android.os.HandlerThread("vx-proxy-fd").also { it.start() } }
+    private val proxyHandler by lazy { android.os.Handler(proxyThread.looper) }
+
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val inodeOid = uri.lastPathSegment?.toLongOrNull() ?: run {
-            Log.e(TAG, "DriveFileProvider: invalid URI, no inodeOid: $uri")
-            return null
+            Log.e(TAG, "DriveFileProvider: invalid URI, no inodeOid: $uri"); return null
         }
-
-        val fsReader = ActiveDriveSession.reader ?: run {
-            Log.e(TAG, "DriveFileProvider: no active drive session")
-            return null
-        }
-
+        val fsReader = ActiveDriveSession.reader ?: run { Log.e(TAG, "DriveFileProvider: no active drive session"); return null }
         val volIndex = ActiveDriveSession.currentVolumeIndex
         val filePath = uri.getQueryParameter("path") ?: ""
-
-        val (readEnd, writeEnd) = ParcelFileDescriptor.createPipe()
-
-        Thread {
-            try {
-                ParcelFileDescriptor.AutoCloseOutputStream(writeEnd).use { out ->
-                    // Find the entry by walking the directory for this inode OID
-                    val entry = findEntryByOid(fsReader, volIndex, inodeOid, filePath)
-                    if (entry == null) {
-                        Log.e(TAG, "DriveFileProvider: entry not found for oid=$inodeOid path=$filePath")
-                        return@use
-                    }
-                    val data = fsReader.readFile(entry)
-                    if (data != null) {
-                        out.write(data)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "DriveFileProvider: error streaming file", e)
-                try { writeEnd.close() } catch (_: Exception) {}
+        val entry = findEntryByOid(fsReader, volIndex, inodeOid, filePath) ?: run {
+            Log.e(TAG, "DriveFileProvider: entry not found for oid=$inodeOid path=$filePath"); return null
+        }
+        val sm = context?.getSystemService(android.os.storage.StorageManager::class.java) ?: return null
+        // A real random-access descriptor: players can seek, and nothing is buffered in memory.
+        val callback = object : android.os.ProxyFileDescriptorCallback() {
+            override fun onGetSize(): Long = entry.size
+            override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
+                val n = fsReader.readRange(entry, offset, data, 0, size)
+                if (n < 0) throw android.system.ErrnoException("onRead", android.system.OsConstants.EIO)
+                return n
             }
-        }.start()
-
-        return readEnd
+            override fun onRelease() {}
+        }
+        return sm.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, callback, proxyHandler)
     }
 
     private fun findEntryByOid(

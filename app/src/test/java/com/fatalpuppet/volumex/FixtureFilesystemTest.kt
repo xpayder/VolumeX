@@ -99,6 +99,25 @@ class FixtureFilesystemTest(private val name: String, private val expectedType: 
         assertTrue("$name: ${failures.size} of ${manifest().size} files wrong:\n" + failures.take(15).joinToString("\n"), failures.isEmpty())
     }
 
+    @Test fun random_access_ranges_match_full_read() {
+        val (r, _) = mount()
+        val rnd = java.util.Random(11)
+        for (path in listOf("big.bin", "odd4097.bin", "hello.txt")) {
+            val e = find(r, path)!!
+            val full = r.readFile(e)!!
+            repeat(250) {
+                val off = if (full.isEmpty()) 0L else rnd.nextInt(full.size).toLong()
+                val len = 1 + rnd.nextInt(70000)
+                val buf = ByteArray(len)
+                val n = r.readRange(e, off, buf, 0, len)
+                val expect = minOf(len.toLong(), full.size - off).toInt().coerceAtLeast(0)
+                assertEquals("$name $path off=$off len=$len", expect, n)
+                assertTrue("$name $path content off=$off len=$len", java.util.Arrays.equals(buf.copyOf(n), full.copyOfRange(off.toInt(), off.toInt() + n)))
+            }
+            assertEquals(0, r.readRange(e, full.size.toLong(), ByteArray(8), 0, 8))
+        }
+    }
+
     @Test fun large_directory_lists_all_300() {
         val (r, _) = mount()
         val many = find(r, "many")

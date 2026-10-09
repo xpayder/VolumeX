@@ -201,6 +201,36 @@ class ApfsReader(
         inodeOid = ApfsConstants.ROOT_DIR_INO_NUM
     )
 
+    override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
+        val sb = containerSb ?: return -1
+        if (offset >= entry.size) return 0
+        val bs = sb.blockSize
+        val btree = parser(sb.blockSize)
+        val want = minOf(len.toLong(), entry.size - offset).toInt()
+        var done = 0; var pos = offset
+        val extents = entry.extents.sortedBy { it.logicalAddr }
+        while (done < want) {
+            val ext = extents.firstOrNull { pos >= it.logicalAddr && pos < it.logicalAddr + it.length }
+            if (ext == null) {            // hole -> zeros up to the next extent / end
+                val next = extents.firstOrNull { it.logicalAddr > pos }?.logicalAddr ?: entry.size
+                val n = minOf((next - pos).toInt(), want - done).coerceAtLeast(1)
+                java.util.Arrays.fill(buf, bufOff + done, bufOff + done + n, 0); done += n; pos += n; continue
+            }
+            val inExt = pos - ext.logicalAddr
+            val n = minOf(want - done, (ext.length - inExt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            if (ext.physBlockNum == 0L) { java.util.Arrays.fill(buf, bufOff + done, bufOff + done + n, 0) }
+            else {
+                val startByte = ext.physBlockNum * bs + inExt
+                val lba = partitionStartLba + startByte / 512
+                val sectors = ((startByte % 512).toInt() + n + 511) / 512
+                val data = reader.readSectors(lba, sectors) ?: return if (done > 0) done else -1
+                System.arraycopy(data, (startByte % 512).toInt(), buf, bufOff + done, n)
+            }
+            done += n; pos += n
+        }
+        return done
+    }
+
     override fun unmount() {
         containerSb = null
         volumes.clear()

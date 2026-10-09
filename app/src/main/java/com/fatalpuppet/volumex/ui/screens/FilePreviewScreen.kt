@@ -47,17 +47,39 @@ fun FilePreviewScreen(
     val items = remember(entry, siblings) { if (siblings.any { it.path == entry.path }) siblings else listOf(entry) }
     val startIndex = remember(entry, items) { items.indexOfFirst { it.path == entry.path }.coerceAtLeast(0) }
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = startIndex) { items.size }
-    val current = items[pager.currentPage.coerceIn(0, items.lastIndex)]
+    var mediaIndex by remember(entry) { mutableStateOf(startIndex) }
+    val isImage = entry.fileType == FileType.IMAGE
+    val current = if (isImage) items[pager.currentPage.coerceIn(0, items.lastIndex)] else items[mediaIndex.coerceIn(0, items.lastIndex)]
+    val position = if (isImage) pager.currentPage else mediaIndex
     var confirmDelete by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
+
+    // landscape + hidden system bars while a video is fullscreen
+    val activity = context as? android.app.Activity
+    DisposableEffect(fullscreen) {
+        val window = activity?.window
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+        if (fullscreen) {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
 
     Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
+            if (!fullscreen) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
                 IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
                 Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                     Text(current.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    Text(if (items.size > 1) "${pager.currentPage + 1} of ${items.size}" else current.formattedSize, color = TextTertiary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    Text(if (items.size > 1) "${position + 1} of ${items.size}" else current.formattedSize, color = TextTertiary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
+                if (current.fileType == FileType.VIDEO) IconButton(onClick = { fullscreen = true }) { Icon(Icons.Default.Fullscreen, "Fullscreen", tint = TextSecondary) }
                 IconButton(onClick = {
                     val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                         type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(current.extension) ?: "*/*"
@@ -69,22 +91,23 @@ fun FilePreviewScreen(
                 if (canDelete) IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete", tint = TextSecondary) }
             }
 
-            if (current.fileType == FileType.IMAGE) {
+            if (isImage) {
                 androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items[it].path }) { page ->
                     val e = items[page]
                     Box(Modifier.fillMaxSize().padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
-                        if (e.fileType == FileType.IMAGE) ImagePreview(DriveFileProvider.buildUri(e.inodeOid, e.path), e.name)
-                        else GenericPreview(e.name)
+                        if (e.fileType == FileType.IMAGE) ImagePreview(DriveFileProvider.buildUri(e.inodeOid, e.path), e.name) else GenericPreview(e.name)
                     }
                 }
             } else {
                 val uri = remember(current.inodeOid, current.path) { DriveFileProvider.buildUri(current.inodeOid, current.path) }
-                Box(modifier = Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
-                    when (current.fileType) {
-                        FileType.VIDEO -> VideoPreview(uri, current.name)
-                        FileType.AUDIO -> AudioPreview(uri, current.name)
-                        else -> GenericPreview(current.name)
-                    }
+                when (current.fileType) {
+                    FileType.VIDEO -> VideoPlayerView(
+                        uri = uri, modifier = Modifier.fillMaxSize(),
+                        onPrev = if (mediaIndex > 0) ({ mediaIndex-- }) else null,
+                        onNext = if (mediaIndex < items.lastIndex) ({ mediaIndex++ }) else null
+                    )
+                    FileType.AUDIO -> Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) { AudioPreview(uri, current.name) }
+                    else -> Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) { GenericPreview(current.name) }
                 }
             }
         }

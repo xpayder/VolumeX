@@ -81,6 +81,45 @@ class ExFatReader(
         return raw.copyOf(entry.size.coerceAtMost(raw.size.toLong()).toInt())
     }
 
+    private val chainCache = object : LinkedHashMap<Long, LongArray>(16, 0.75f, true) { override fun removeEldestEntry(e: MutableMap.MutableEntry<Long, LongArray>?) = size > 8 }
+
+    private fun chainOf(entry: FileSystemEntry): LongArray {
+        val b = boot!!
+        synchronized(chainCache) { chainCache[entry.inodeOid]?.let { return it } }
+        val count = ((entry.size + b.bytesPerCluster - 1) / b.bytesPerCluster).toInt()
+        val arr = LongArray(count)
+        var c = entry.inodeOid
+        for (i in 0 until count) {
+            arr[i] = c
+            c = if (entry.contiguous) c + 1 else readFatEntry(c)
+        }
+        synchronized(chainCache) { chainCache[entry.inodeOid] = arr }
+        return arr
+    }
+
+    override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
+        val b = boot ?: return -1
+        if (offset >= entry.size) return 0
+        val bpc = b.bytesPerCluster
+        val chain = chainOf(entry)
+        var pos = offset; var done = 0
+        val want = minOf(len.toLong(), entry.size - offset).toInt()
+        while (done < want) {
+            val ci = (pos / bpc).toInt(); if (ci >= chain.size) break
+            val inCluster = (pos % bpc).toInt()
+            // extend over physically consecutive clusters
+            var run = 1
+            while (ci + run < chain.size && chain[ci + run] == chain[ci] + run && (run * bpc - inCluster) < want - done) run++
+            val bytes = minOf(want - done, run * bpc - inCluster)
+            val firstSector = inCluster / 512
+            val sectors = (inCluster % 512 + bytes + 511) / 512
+            val data = blockDevice.readSectors(clusterToLba(chain[ci]) + firstSector, sectors) ?: return if (done > 0) done else -1
+            System.arraycopy(data, inCluster % 512, buf, bufOff + done, bytes)
+            done += bytes; pos += bytes
+        }
+        return done
+    }
+
     override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
         val b = boot ?: return false
         if (entry.size <= 0) return true

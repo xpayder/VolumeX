@@ -131,6 +131,13 @@ class HfsPlusReader(
         return parser.readFileFork(fork)
     }
 
+    override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
+        val parser = btreeParser ?: return -1
+        val catalogEntry = allEntries.find { it.catalogId == entry.hfsCatalogId && !it.isDirectory } ?: return -1
+        val fork = catalogEntry.dataFork ?: return 0
+        return parser.readForkRange(fork, offset, buf, bufOff, len)
+    }
+
     override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
         refreshIfChanged()
         val parser = btreeParser ?: return false

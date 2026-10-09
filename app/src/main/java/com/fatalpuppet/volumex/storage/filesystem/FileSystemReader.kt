@@ -34,6 +34,26 @@ interface FileSystemReader {
         return results
     }
 
+    /**
+     * Random access: copy up to [len] bytes of the file starting at [offset] into [buf]. Returns the number of
+     * bytes read (0 at/after EOF, -1 on error). The default streams from the start; readers override it.
+     */
+    fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
+        if (offset >= entry.size) return 0
+        var skipped = 0L; var filled = 0
+        val sink = object : java.io.OutputStream() {
+            override fun write(b: Int) { write(byteArrayOf(b.toByte()), 0, 1) }
+            override fun write(b: ByteArray, o: Int, l: Int) {
+                var start = o; var count = l
+                if (skipped < offset) { val s = minOf(offset - skipped, count.toLong()).toInt(); skipped += s; start += s; count -= s }
+                if (count > 0 && filled < len) { val c = minOf(count, len - filled); System.arraycopy(b, start, buf, bufOff + filled, c); filled += c }
+                if (filled >= len) throw java.io.IOException("range complete")
+            }
+        }
+        try { readFileTo(entry, sink) } catch (e: java.io.IOException) { if (filled < len) return -1 }
+        return filled
+    }
+
     /** The root directory as an entry usable as the parent for write operations. */
     fun rootEntry(volumeIndex: Int = 0): FileSystemEntry =
         FileSystemEntry(name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0)

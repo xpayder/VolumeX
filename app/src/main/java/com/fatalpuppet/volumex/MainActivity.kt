@@ -155,8 +155,7 @@ class MainActivity : ComponentActivity() {
                         val browserWritable by fileBrowserViewModel.writable.collectAsState()
                         FilePreviewScreen(
                             entry = previewEntry,
-                            siblings = if (previewEntry.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.IMAGE)
-                                browserEntries.filter { it.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.IMAGE } else listOf(previewEntry),
+                            siblings = browserEntries.filter { it.fileType == previewEntry.fileType && !it.isDirectory }.ifEmpty { listOf(previewEntry) },
                             canDelete = browserWritable,
                             onDelete = { fileBrowserViewModel.deleteEntries(listOf(it)) },
                             onNavigateBack = { currentScreen = Screen.FileBrowser(0) }

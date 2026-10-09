@@ -37,6 +37,9 @@ class CompositeReader(private val parts: List<FilesystemMounter.MountedPartition
     override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean =
         parts.getOrNull(entry.partitionId)?.reader?.readFileTo(entry, out, onProgress) ?: false
 
+    override fun readRange(entry: FileSystemEntry, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int =
+        parts.getOrNull(entry.partitionId)?.reader?.readRange(entry, offset, buf, bufOff, len) ?: -1
+
     override fun rootEntry(volumeIndex: Int): FileSystemEntry {
         val s = slot(volumeIndex) ?: return super.rootEntry(volumeIndex)
         return parts[s.part].reader.rootEntry(s.local).copy(partitionId = s.part)

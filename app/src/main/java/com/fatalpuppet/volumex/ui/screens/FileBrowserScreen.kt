@@ -326,7 +326,9 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, onClick: () ->
                 .border(if (isSelected) 2.dp else 1.dp, if (isSelected) AccentBlue else GlassBorderFaint, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
-            if (entry.fileType == FileType.IMAGE) {
+            if (entry.fileType == FileType.VIDEO) {
+                VideoThumb(entry, Modifier.fillMaxSize())
+            } else if (entry.fileType == FileType.IMAGE) {
                 AsyncImage(
                     model = ImageRequest.Builder(context).data(DriveFileProvider.buildUri(entry.inodeOid, entry.path)).size(360).crossfade(true).build(),
                     contentDescription = entry.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()

@@ -218,6 +218,27 @@ class HfsPlusBTreeParser(
         return HfsPlusForkData(logicalSize, clumpSize, totalBlocks, extents)
     }
 
+    /** Random access inside a data fork (inline extents). Returns bytes copied. */
+    fun readForkRange(fork: HfsPlusForkData, offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
+        if (offset >= fork.logicalSize) return 0
+        val bs = volumeHeader.blockSize.toLong()
+        val want = minOf(len.toLong(), fork.logicalSize - offset).toInt()
+        var done = 0; var pos = offset
+        while (done < want) {
+            val fb = pos / bs; var acc = 0L; var phys = -1L; var extLeft = 0L
+            for (e in fork.extents) { if (e.blockCount == 0) continue; if (fb < acc + e.blockCount) { phys = e.startBlock.toLong() + (fb - acc); extLeft = e.blockCount - (fb - acc); break }; acc += e.blockCount }
+            if (phys < 0) return if (done > 0) done else -1
+            val inBlock = (pos % bs).toInt()
+            val bytes = minOf(want - done, (extLeft * bs - inBlock).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            val lba = partitionStartLba + phys * (bs / 512) + inBlock / 512
+            val sectors = (inBlock % 512 + bytes + 511) / 512
+            val data = reader.readSectors(lba, sectors) ?: return if (done > 0) done else -1
+            System.arraycopy(data, inBlock % 512, buf, bufOff + done, bytes)
+            done += bytes; pos += bytes
+        }
+        return done
+    }
+
     /** Stream a file's data fork (logicalSize bytes) to [out]. */
     fun readForkTo(fork: HfsPlusForkData, out: java.io.OutputStream, onProgress: ((Long) -> Unit)? = null): Boolean {
         val blockSize = volumeHeader.blockSize
