@@ -169,6 +169,11 @@ class ApfsReader(
         return true
     }
 
+    override fun rootEntry(volumeIndex: Int): FileSystemEntry = FileSystemEntry(
+        name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
+        inodeOid = ApfsConstants.ROOT_DIR_INO_NUM
+    )
+
     override fun unmount() {
         containerSb = null
         volumes.clear()

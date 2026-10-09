@@ -54,8 +54,16 @@ class Fat32Writer(
     }
 
     private fun flushFat() {
-        for (sec in dirtyFat) for (f in 0 until header.fatCount) {
-            dev.writeSector(header.fatStartLba + f * header.fatSize32 + sec, fatCache[sec]!!)
+        // group consecutive dirty FAT sectors into single multi-sector writes
+        val secs = dirtyFat.toList()
+        var i = 0
+        while (i < secs.size) {
+            var j = i
+            while (j + 1 < secs.size && secs[j + 1] == secs[j] + 1 && j - i < 255) j++
+            val run = ByteArray((j - i + 1) * bps)
+            for (k in i..j) System.arraycopy(fatCache[secs[k]]!!, 0, run, (k - i) * bps, bps)
+            for (f in 0 until header.fatCount) dev.writeSectors(header.fatStartLba + f * header.fatSize32 + secs[i], run)
+            i = j + 1
         }
         dirtyFat.clear()
         updateFsInfo()
@@ -320,18 +328,44 @@ class Fat32Writer(
 
     // ── FileSystemWriter ──────────────────────────────────────────────────────
 
-    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean = guarded("writeFile $name") {
-        if (!validName(name) || data.size.toLong() > 0xFFFFFFFFL) return@guarded false
+    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean =
+        writeFileStream(parentEntry, name, data.size.toLong(), java.io.ByteArrayInputStream(data), null)
+
+    override fun writeFileStream(
+        parentEntry: FileSystemEntry, name: String, size: Long,
+        input: java.io.InputStream, onProgress: ((Long) -> Unit)?
+    ): Boolean = guarded("writeFile $name") {
+        if (!validName(name) || size < 0 || size > 0xFFFFFFFFL) return@guarded false
         val dir = dirOf(parentEntry) ?: return@guarded false
         val buf = open(dir)
         if (scan(buf.data).any { it.name.equals(name, true) }) return@guarded false
-        val n = (data.size + csize - 1) / csize
+        val n = ((size + csize - 1) / csize).toInt()
         val cl = allocate(n) ?: return@guarded false
-        writeClusters(cl, data)
-        val short = uniqueShort(name, shortsIn(buf.data))
-        val ents = buildEntries(name, short, ATTR_ARCHIVE, cl.firstOrNull() ?: 0L, data.size.toLong(), System.currentTimeMillis())
-        if (!insert(buf, ents)) { cl.firstOrNull()?.let { freeChain(it) }; return@guarded false }
-        flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+        try {
+            val chunkClusters = ((1 shl 20) / csize).coerceAtLeast(1)
+            val rb = ByteArray(chunkClusters * csize)
+            var idx = 0; var written = 0L
+            while (idx < n) {
+                val cnt = minOf(chunkClusters, n - idx)
+                val want = minOf((cnt * csize).toLong(), size - written).toInt()
+                var got = 0
+                while (got < want) { val r = input.read(rb, got, want - got); if (r < 0) break; got += r }
+                if (got < want) throw java.io.IOException("source ended early")
+                java.util.Arrays.fill(rb, got, cnt * csize, 0)
+                writeClusters(cl.subList(idx, idx + cnt), rb.copyOf(cnt * csize))
+                idx += cnt; written += got
+                onProgress?.invoke(written)
+            }
+            val short = uniqueShort(name, shortsIn(buf.data))
+            val ents = buildEntries(name, short, ATTR_ARCHIVE, cl.firstOrNull() ?: 0L, size, System.currentTimeMillis())
+            if (!insert(buf, ents)) throw java.io.IOException("directory full")
+            flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "FAT32 write aborted, releasing clusters", e)
+            cl.firstOrNull()?.let { freeChain(it) }; flushFat()
+            false
+        }
     }
 
     override fun createDirectory(parentEntry: FileSystemEntry, name: String): Boolean = guarded("createDirectory $name") {

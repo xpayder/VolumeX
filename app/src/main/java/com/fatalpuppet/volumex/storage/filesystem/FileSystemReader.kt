@@ -34,6 +34,10 @@ interface FileSystemReader {
         return results
     }
 
+    /** The root directory as an entry usable as the parent for write operations. */
+    fun rootEntry(volumeIndex: Int = 0): FileSystemEntry =
+        FileSystemEntry(name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0)
+
     /** Release resources. */
     fun unmount()
 }

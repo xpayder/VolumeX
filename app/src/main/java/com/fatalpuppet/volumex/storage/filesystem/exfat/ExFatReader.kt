@@ -104,6 +104,11 @@ class ExFatReader(
         return remaining <= 0
     }
 
+    override fun rootEntry(volumeIndex: Int): FileSystemEntry = FileSystemEntry(
+        name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
+        inodeOid = boot?.rootDirectoryCluster ?: 0L
+    )
+
     override fun unmount() { boot = null }
 
     // ── Internal helpers ─────────────────────────────────────────────────────────

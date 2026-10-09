@@ -387,21 +387,47 @@ class ExFatWriter(
 
     // ── FileSystemWriter ──────────────────────────────────────────────────────
 
-    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean = guarded("writeFile $name") {
-        if (!init() || !validName(name)) return@guarded false
+    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean =
+        writeFileStream(parentEntry, name, data.size.toLong(), java.io.ByteArrayInputStream(data), null)
+
+    override fun writeFileStream(
+        parentEntry: FileSystemEntry, name: String, size: Long,
+        input: java.io.InputStream, onProgress: ((Long) -> Unit)?
+    ): Boolean = guarded("writeFile $name") {
+        if (!init() || !validName(name) || size < 0) return@guarded false
         val dir = dirOf(parentEntry) ?: return@guarded false
         val buf = Buf(dir, readDir(dir))
         if (scan(buf.data).any { nameEq(it.name, name) }) { Log.w(TAG, "exFAT: '$name' already exists"); return@guarded false }
 
-        val n = ((data.size + csize - 1) / csize)
+        val n = ((size + csize - 1) / csize).toInt()
         val clusters = allocate(n) ?: run { Log.e(TAG, "exFAT: no space for $name"); return@guarded false }
-        writeClusters(clusters, data)
-        if (clusters.isNotEmpty()) fatSetMany(chainOf(clusters))
-        flushBitmap()
-        val set = buildSet(name, 0x20, clusters.firstOrNull() ?: 0L, data.size.toLong(), data.size.toLong(), 0x01, System.currentTimeMillis())
-        insert(buf, set) ?: return@guarded false
-        writeDir(buf.dir, buf.data)
-        dev.flushCache()
+        try {
+            val chunkClusters = ((1 shl 20) / csize).coerceAtLeast(1)
+            val rb = ByteArray(chunkClusters * csize)
+            var idx = 0; var written = 0L
+            while (idx < n) {
+                val cnt = minOf(chunkClusters, n - idx)
+                val want = minOf((cnt * csize).toLong(), size - written).toInt()
+                var got = 0
+                while (got < want) { val r = input.read(rb, got, want - got); if (r < 0) break; got += r }
+                if (got < want) throw java.io.IOException("source ended early ($written+$got of $size)")
+                java.util.Arrays.fill(rb, got, cnt * csize, 0)
+                writeClusters(clusters.subList(idx, idx + cnt), rb, cnt * csize)
+                idx += cnt; written += got
+                onProgress?.invoke(written)
+            }
+            if (clusters.isNotEmpty()) fatSetMany(chainOf(clusters))
+            flushBitmap()
+            val set = buildSet(name, 0x20, clusters.firstOrNull() ?: 0L, size, size, 0x01, System.currentTimeMillis())
+            insert(buf, set) ?: throw java.io.IOException("directory full")
+            writeDir(buf.dir, buf.data)
+            dev.flushCache()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "exFAT write aborted, releasing clusters", e)
+            clusters.forEach { bitSet(it, false) }; flushBitmap()
+            false
+        }
     }
 
     override fun createDirectory(parentEntry: FileSystemEntry, name: String): Boolean = guarded("createDirectory $name") {

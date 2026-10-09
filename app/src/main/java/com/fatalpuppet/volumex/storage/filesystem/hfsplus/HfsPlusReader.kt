@@ -140,6 +140,11 @@ class HfsPlusReader(
             }
     }
 
+    override fun rootEntry(volumeIndex: Int): FileSystemEntry = FileSystemEntry(
+        name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
+        hfsCatalogId = HfsPlusConstants.ROOT_FOLDER_ID
+    )
+
     override fun unmount() {
         volumeHeader = null
         btreeParser = null

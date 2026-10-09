@@ -96,6 +96,11 @@ class Fat32Reader(
         return results
     }
 
+    override fun rootEntry(volumeIndex: Int): FileSystemEntry = FileSystemEntry(
+        name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
+        inodeOid = header?.rootCluster ?: 2L
+    )
+
     override fun unmount() {
         header = null
     }
