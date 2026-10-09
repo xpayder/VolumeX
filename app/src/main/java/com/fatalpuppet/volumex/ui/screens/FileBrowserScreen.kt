@@ -76,6 +76,7 @@ fun FileBrowserScreen(
     var renameTarget by remember { mutableStateOf<FileSystemEntry?>(null) }
     var deleteTargets by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
     var pendingCopy by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
+    var askDest by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
     LaunchedEffect(message) {
@@ -90,7 +91,7 @@ fun FileBrowserScreen(
         if (uri != null && pendingCopy.isNotEmpty()) viewModel.copyToTree(context, uri, pendingCopy)
         pendingCopy = emptyList()
     }
-    fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; treeLauncher.launch(null) } }
+    fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; askDest = true } }
 
     // Context menu state
     var contextMenuEntry by remember { mutableStateOf<FileSystemEntry?>(null) }
@@ -266,6 +267,28 @@ fun FileBrowserScreen(
             }
         }
 
+        if (askDest) {
+            AlertDialog(
+                onDismissRequest = { askDest = false; pendingCopy = emptyList() },
+                title = { Text("Copy to phone", color = TextPrimary) },
+                text = {
+                    Column {
+                        ContextMenuItem(Icons.Default.Download, "Downloads / VolumeX") {
+                            askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList()
+                        }
+                        ContextMenuItem(Icons.Default.FolderOpen, "Choose another folder…") {
+                            askDest = false; treeLauncher.launch(null)
+                        }
+                        Text("Android does not allow choosing Downloads or the storage root in the folder picker, so use the first option for those.",
+                            color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } },
+                containerColor = DarkCard
+            )
+        }
+
         if (showNewFolder) {
             TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
         }
@@ -312,11 +335,7 @@ fun FileBrowserScreen(
                     contextMenuEntry = null
                     askDestination(listOf(entry))
                 },
-                onCopyToDownloads = if (!entry.isDirectory) ({
-                    contextMenuEntry = null
-                    viewModel.toggleSelection(entry)
-                    viewModel.copySelectedToAndroid(context)
-                }) else null,
+                onCopyToDownloads = null,
                 onRename = if (writable) ({ contextMenuEntry = null; renameTarget = entry }) else null,
                 onDelete = if (writable) ({ contextMenuEntry = null; deleteTargets = listOf(entry) }) else null,
                 onFolderDetails = if (entry.isDirectory) ({

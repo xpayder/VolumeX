@@ -53,3 +53,21 @@ make_multi() {
   echo "built $img"
 }
 make_multi
+
+# exFAT with 128 KB clusters and a busy root (like a 1 TB drive formatted by Windows).
+make_exfat128() {
+  local img="$OUT/exfat128.img"; rm -f "$img"; mkfile -n 2048m "$img"
+  local dev; dev=$(hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount "$img" | awk 'NR==1{print $1}')
+  diskutil partitionDisk "$dev" GPT ExFAT VX128 R >/dev/null
+  local part; part=$(diskutil list "$dev" | awk '/VX128/{print $NF}')
+  diskutil unmount "/dev/$part" >/dev/null 2>&1
+  newfs_exfat -c 256 -v VX128 "/dev/r$part" >/dev/null
+  diskutil mount "/dev/$part" >/dev/null
+  local m="/Volumes/VX128"
+  for i in $(seq 1 400); do printf 'row %s\n' "$i" > "$m/item $i - Пример.txt"; done
+  mkdir -p "$m/Android" "$m/Samples (old)"; printf 'hello\n' > "$m/Android/a.txt"
+  sync; manifest "$m" "$OUT/exfat128.manifest"
+  diskutil unmountDisk "$dev" >/dev/null; hdiutil detach "$dev" >/dev/null
+  echo "built $img"
+}
+make_exfat128

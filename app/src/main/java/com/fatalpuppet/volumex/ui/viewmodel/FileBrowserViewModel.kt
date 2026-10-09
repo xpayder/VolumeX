@@ -56,6 +56,7 @@ class FileBrowserViewModel : ViewModel() {
     /** One-shot user-facing message (errors / confirmations) shown as a snackbar. */
     val message: StateFlow<String?> = _message.asStateFlow()
     fun consumeMessage() { _message.value = null }
+    private fun say(text: String) { Log.w(TAG, "UI message: $text"); _message.value = text }
 
     private var reader: FileSystemReader? = null
     private var currentVolumeIndex: Int = 0
@@ -237,10 +238,10 @@ class FileBrowserViewModel : ViewModel() {
 
     /** Copy files picked on the phone onto the current folder of the drive. */
     fun importUris(context: Context, uris: List<Uri>) {
-        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val dest = currentPath
         viewModelScope.launch(Dispatchers.IO) {
-            val parent = resolveDirEntry(dest) ?: run { _message.value = "Could not open the destination folder"; return@launch }
+            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launch }
             val resolver = context.contentResolver
             val progresses = mutableListOf<TransferProgress>()
             val infos = uris.map { u ->
@@ -277,37 +278,78 @@ class FileBrowserViewModel : ViewModel() {
     }
 
     fun createFolder(name: String) {
-        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val dest = currentPath
         viewModelScope.launch(Dispatchers.IO) {
             val parent = resolveDirEntry(dest)
             val ok = parent != null && try { w.createDirectory(parent, name.trim()) } catch (e: Exception) { false }
-            _message.value = if (ok) "Folder created" else "Could not create folder (name exists or invalid)"
+            say(if (ok) "Folder created" else "Could not create folder (name exists or invalid)")
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
     }
 
     fun deleteEntries(entries: List<FileSystemEntry>) {
-        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         viewModelScope.launch(Dispatchers.IO) {
             var failed = 0
             for (e in entries) if (!(try { w.deleteEntry(e) } catch (x: Exception) { false })) failed++
-            _message.value = if (failed == 0) "Deleted ${entries.size} item${if (entries.size != 1) "s" else ""}" else "$failed item(s) could not be deleted"
+            say(if (failed == 0) "Deleted ${entries.size} item${if (entries.size != 1) "s" else ""}" else "$failed item(s) could not be deleted")
             _selectedEntries.value = emptySet()
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
     }
 
     fun renameEntry(entry: FileSystemEntry, newName: String) {
-        val w = ActiveDriveSession.writer ?: run { _message.value = "This drive is mounted read-only"; return }
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         viewModelScope.launch(Dispatchers.IO) {
             val ok = try { w.renameEntry(entry, newName.trim()) } catch (e: Exception) { false }
-            _message.value = if (ok) "Renamed" else "Could not rename (name exists or invalid)"
+            say(if (ok) "Renamed" else "Could not rename (name exists or invalid)")
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
     }
 
     // ── Copy from the drive to a folder the user picks (Storage Access Framework) ──
+
+    /** Copy files/folders to Downloads/VolumeX (no picker needed). */
+    fun copyToDownloads(context: Context, items: List<FileSystemEntry>) {
+        val r = reader ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val base = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "VolumeX")
+            val progresses = mutableListOf<TransferProgress>()
+            _transferProgress.value = emptyList()
+            fun uniq(dir: java.io.File, name: String): java.io.File {
+                var f = java.io.File(dir, name); var n = 1
+                val dot = name.lastIndexOf('.'); val stem = if (dot > 0) name.substring(0, dot) else name; val ext = if (dot > 0) name.substring(dot) else ""
+                while (f.exists()) { f = java.io.File(dir, "$stem ($n)$ext"); n++ }
+                return f
+            }
+            fun copyOne(e: FileSystemEntry, dir: java.io.File) {
+                if (e.isDirectory) {
+                    val d = java.io.File(dir, e.name).also { it.mkdirs() }
+                    r.listDirectory(currentVolumeIndex, e.path).forEach { copyOne(it, d) }
+                    return
+                }
+                val idx = progresses.size
+                progresses.add(TransferProgress(e.name, 0, e.size)); _transferProgress.value = progresses.toList()
+                dir.mkdirs()
+                val dest = uniq(dir, e.name)
+                try {
+                    val ok = java.io.BufferedOutputStream(java.io.FileOutputStream(dest), 1 shl 20).use { out ->
+                        r.readFileTo(e, out) { n -> updateProgress(progresses, idx, TransferProgress(e.name, n, e.size)) }
+                    }
+                    if (!ok) dest.delete()
+                    updateProgress(progresses, idx, if (ok) TransferProgress(e.name, e.size, e.size, isComplete = true)
+                        else TransferProgress(e.name, 0, e.size, isComplete = true, error = "Could not read file from the drive"))
+                } catch (x: Exception) {
+                    dest.delete(); Log.e(TAG, "copyToDownloads failed: ${e.name}", x)
+                    updateProgress(progresses, idx, TransferProgress(e.name, 0, e.size, isComplete = true, error = x.message ?: "Error"))
+                }
+            }
+            items.forEach { copyOne(it, base) }
+            say("Saved to Downloads/VolumeX")
+            _selectedEntries.value = emptySet()
+        }
+    }
 
     fun entriesByPaths(paths: Set<String>): List<FileSystemEntry> = _entries.value.filter { it.path in paths }
 
