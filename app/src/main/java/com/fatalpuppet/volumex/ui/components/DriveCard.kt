@@ -38,7 +38,7 @@ fun DriveCard(
     }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(24.dp)).background(DarkSurface).border(1.dp, GlassBorderFaint, RoundedCornerShape(24.dp))
+            .glassOrSolid(RoundedCornerShape(26.dp))
     ) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 18.dp, end = 18.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(

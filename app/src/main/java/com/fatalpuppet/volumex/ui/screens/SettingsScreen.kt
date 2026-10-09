@@ -91,7 +91,8 @@ fun SettingsScreen(
                                 com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite = true
                             }) { Text("Enable", color = AccentBlue) } },
                             dismissButton = { TextButton(onClick = { confirmApfs = false }) { Text("Cancel", color = TextTertiary) } },
-                            containerColor = DarkCard
+                            containerColor = DarkCard,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
                         )
                     }
                 }

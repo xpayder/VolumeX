@@ -33,11 +33,10 @@ fun HomeScreen(
     val deviceState by viewModel.deviceState.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DeepNavy)
-    ) {
+    val hazeState = dev.chrisbanes.haze.rememberHazeState()
+    androidx.compose.runtime.CompositionLocalProvider(LocalHaze provides hazeState) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        AmbientBackdrop(hazeState, Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             // Top bar
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -93,6 +92,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 }
 

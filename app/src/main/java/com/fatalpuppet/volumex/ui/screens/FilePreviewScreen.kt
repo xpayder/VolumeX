@@ -1,5 +1,8 @@
 package com.fatalpuppet.volumex.ui.screens
 
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import dev.chrisbanes.haze.hazeSource
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
@@ -71,9 +74,11 @@ fun FilePreviewScreen(
     }
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
 
+    val hazeState = dev.chrisbanes.haze.rememberHazeState()
     Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (!fullscreen) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
+        var headerPx by remember { mutableIntStateOf(0) }
+        val headerDp = with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() }
+        if (!fullscreen) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.TopCenter).zIndex(1f).onSizeChanged { headerPx = it.height }.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).liquidGlass(hazeState, RoundedCornerShape(24.dp)).padding(horizontal = 4.dp, vertical = 6.dp)) {
                 IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
                 Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                     Text(current.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -90,6 +95,7 @@ fun FilePreviewScreen(
                 }) { Icon(Icons.Default.Share, "Share", tint = TextSecondary) }
                 if (canDelete) IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete", tint = TextSecondary) }
             }
+        Column(modifier = Modifier.fillMaxSize().hazeSource(hazeState)) {
 
             if (isImage) {
                 androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items[it].path }) { page ->
@@ -102,12 +108,12 @@ fun FilePreviewScreen(
                 val uri = remember(current.inodeOid, current.path) { DriveFileProvider.buildUri(current.inodeOid, current.path) }
                 when (current.fileType) {
                     FileType.VIDEO -> VideoPlayerView(
-                        uri = uri, modifier = Modifier.fillMaxSize(),
+                        uri = uri, modifier = Modifier.fillMaxSize().padding(top = if (fullscreen) 0.dp else headerDp),
                         onPrev = if (mediaIndex > 0) ({ mediaIndex-- }) else null,
                         onNext = if (mediaIndex < items.lastIndex) ({ mediaIndex++ }) else null
                     )
-                    FileType.AUDIO -> Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) { AudioPreview(uri, current.name) }
-                    else -> Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) { GenericPreview(current.name) }
+                    FileType.AUDIO -> Box(Modifier.fillMaxSize().padding(top = headerDp).padding(12.dp), contentAlignment = Alignment.Center) { AudioPreview(uri, current.name) }
+                    else -> Box(Modifier.fillMaxSize().padding(top = headerDp).padding(12.dp), contentAlignment = Alignment.Center) { GenericPreview(current.name) }
                 }
             }
         }
@@ -118,7 +124,8 @@ fun FilePreviewScreen(
                 text = { Text("This permanently removes it from the drive.", color = TextSecondary) },
                 confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete(current); onNavigateBack() }) { Text("Delete", color = AccentRed) } },
                 dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = TextTertiary) } },
-                containerColor = DarkCard
+                containerColor = DarkCard,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
             )
         }
     }

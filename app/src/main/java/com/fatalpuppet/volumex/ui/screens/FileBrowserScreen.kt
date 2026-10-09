@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import coil.compose.AsyncImage
@@ -245,7 +247,7 @@ fun FileBrowserScreen(
                         Text("Android's folder picker cannot pick Downloads or the storage root, so use the first option for those.", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 },
-                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
+                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
             )
         }
         if (showNewFolder) TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
@@ -256,14 +258,14 @@ fun FileBrowserScreen(
                 title = { Text("Delete ${deleteTargets.size} item${if (deleteTargets.size != 1) "s" else ""}?", color = TextPrimary) },
                 text = { Text("This permanently removes ${if (deleteTargets.size == 1) "\"${deleteTargets[0].name}\"" else "the selected items"} from the drive. It cannot be undone.", color = TextSecondary) },
                 confirmButton = { TextButton(onClick = { viewModel.deleteEntries(deleteTargets); deleteTargets = emptyList() }) { Text("Delete", color = AccentRed) } },
-                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
+                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
             )
         }
         propertiesOf?.let { e -> PropertiesDialog(e, driveName) { propertiesOf = null } }
 
         // ── bottom sheet with the file actions ───────────────────────────────
         sheetEntry?.let { e ->
-            ModalBottomSheet(onDismissRequest = { sheetEntry = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = DarkSurface, contentColor = TextPrimary) {
+            ModalBottomSheet(onDismissRequest = { sheetEntry = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = DarkSurface, shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), contentColor = TextPrimary) {
                 Column(Modifier.padding(bottom = 24.dp)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(DarkCard), contentAlignment = Alignment.Center) {
@@ -308,8 +310,11 @@ fun FileBrowserScreen(
 
 @Composable
 private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.92f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 500f), label = "press")
     Column(
-        Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
+        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(RoundedCornerShape(20.dp)).clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
@@ -401,7 +406,7 @@ private fun PropertiesDialog(e: FileSystemEntry, drive: String, onDismiss: () ->
                 PropRow("Modified", date(e.modifiedAt)); PropRow("Created", date(e.createdAt))
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } }, containerColor = DarkCard
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
     )
 }
 
@@ -417,7 +422,7 @@ private fun TextInputDialog(title: String, initial: String, confirm: String, onD
         onDismissRequest = onDismiss, title = { Text(title, color = TextPrimary) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)) },
         confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = AccentBlue) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
     )
 }
 

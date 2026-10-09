@@ -58,7 +58,11 @@ fun FileVaultUnlockScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(DeepNavy)) {
+    val hazeState = dev.chrisbanes.haze.rememberHazeState()
+    androidx.compose.runtime.CompositionLocalProvider(LocalHaze provides hazeState) {
+    Box(Modifier.fillMaxSize()) {
+    AmbientBackdrop(hazeState, Modifier.fillMaxSize())
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onNavigateBack) { Icon(Icons.Default.ArrowBack, "Back to drive", tint = TextPrimary) }
             Text("Back to drive", color = TextSecondary, fontSize = 14.sp)
@@ -125,7 +129,7 @@ fun FileVaultUnlockScreen(
 
             Spacer(Modifier.height(20.dp))
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(DarkSurface).padding(14.dp),
+                Modifier.fillMaxWidth().glassOrSolid(RoundedCornerShape(18.dp)).padding(14.dp),
                 verticalAlignment = Alignment.Top
             ) {
                 Icon(Icons.Default.Shield, null, tint = AccentGreen, modifier = Modifier.size(18.dp).padding(top = 2.dp))
@@ -142,5 +146,7 @@ fun FileVaultUnlockScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+    }
     }
 }
