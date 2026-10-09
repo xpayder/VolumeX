@@ -4,472 +4,394 @@ import android.util.Log
 import com.fatalpuppet.volumex.storage.disk.BlockDeviceReader
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemWriter
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Calendar
 
+/**
+ * FAT32 writer: FAT chains on every FAT copy, FSInfo free-count maintenance, long file names with
+ * the short-name checksum, unique "~N" short aliases, and '.'/'..' entries for new directories.
+ * Write order is data -> FAT -> directory entry.
+ */
 class Fat32Writer(
-    private val blockDevice: BlockDeviceReader,
+    private val dev: BlockDeviceReader,
     private val header: Fat32VolumeHeader
 ) : FileSystemWriter {
 
     companion object {
         private const val TAG = "VolumeX"
-        private const val FAT32_FREE = 0x00000000L
-        private const val FAT32_EOC = 0x0FFFFFF8L
-        private const val DELETED_MARKER = 0xE5.toByte()
-        private const val DIR_ENTRY_SIZE = 32
+        private const val EOC = 0x0FFFFFFFL
+        private const val MASK = 0x0FFFFFFFL
+        private const val ATTR_DIR = 0x10
+        private const val ATTR_ARCHIVE = 0x20
+        private const val ATTR_LFN = 0x0F
     }
 
-    // ── Public interface ────────────────────────────────────────────────────────
+    private val bps = header.bytesPerSector
+    private val spc = header.sectorsPerCluster
+    private val csize = header.clusterSize
+    private val totalClusters = ((header.totalSectors32 - (header.dataAreaLba - header.partitionStartLba)) / spc)
+    private var hint = 2L
+    private var freeDelta = 0L
+    private val fatCache = HashMap<Long, ByteArray>()
 
-    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean {
-        return try {
-            val parentCluster = parentEntry.inodeOid
-            val neededClusters = (data.size + header.clusterSize - 1) / header.clusterSize
-            val firstCluster = allocateClusters(neededClusters.coerceAtLeast(1))
-                ?: run { Log.e(TAG, "writeFile: no free clusters"); return false }
+    // ── FAT access (write-through to all copies) ──────────────────────────────
 
-            writeClusterChain(firstCluster, data)
+    private fun fatSector(sec: Long): ByteArray = fatCache.getOrPut(sec) {
+        dev.readSector(header.fatStartLba + sec)?.clone() ?: ByteArray(bps)
+    }
 
-            val (date, time) = currentFatDateTime()
-            val shortName = generateShortName(name, parentCluster)
-            val dirEntry = buildDirEntry(shortName, false, firstCluster, data.size.toLong(), date, time)
-            val lfnEntries = buildLfnEntries(name, shortName, checksum83(shortName))
+    private fun fatGet(c: Long): Long {
+        val s = fatSector((c * 4) / bps); val o = ((c * 4) % bps).toInt()
+        return ((s[o].toLong() and 0xFF) or ((s[o + 1].toLong() and 0xFF) shl 8) or ((s[o + 2].toLong() and 0xFF) shl 16) or ((s[o + 3].toLong() and 0xFF) shl 24)) and MASK
+    }
 
-            appendDirEntries(parentCluster, lfnEntries + listOf(dirEntry))
-            blockDevice.flushCache()
-            Log.i(TAG, "writeFile: $name (${data.size} bytes) OK")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "writeFile failed", e)
-            false
+    private val dirtyFat = sortedSetOf<Long>()
+    private fun fatPut(c: Long, v: Long) {
+        val sec = (c * 4) / bps; val s = fatSector(sec); val o = ((c * 4) % bps).toInt()
+        val old = (s[o + 3].toLong() and 0xF0) shl 24     // preserve the reserved top nibble
+        val nv = (v and MASK) or old
+        s[o] = nv.toByte(); s[o + 1] = (nv shr 8).toByte(); s[o + 2] = (nv shr 16).toByte(); s[o + 3] = (nv shr 24).toByte()
+        dirtyFat.add(sec)
+    }
+
+    private fun flushFat() {
+        for (sec in dirtyFat) for (f in 0 until header.fatCount) {
+            dev.writeSector(header.fatStartLba + f * header.fatSize32 + sec, fatCache[sec]!!)
+        }
+        dirtyFat.clear()
+        updateFsInfo()
+    }
+
+    private fun updateFsInfo() {
+        if (freeDelta == 0L && hint == 2L) return
+        val boot = dev.readSector(header.partitionStartLba) ?: return
+        val fsInfoSec = (boot[48].toInt() and 0xFF) or ((boot[49].toInt() and 0xFF) shl 8)
+        if (fsInfoSec == 0 || fsInfoSec == 0xFFFF) return
+        val lba = header.partitionStartLba + fsInfoSec
+        val s = dev.readSector(lba)?.clone() ?: return
+        if (le32(s, 0) != 0x41615252L || le32(s, 484) != 0x61417272L) return
+        val free = le32(s, 488)
+        if (free != 0xFFFFFFFFL) putLe32(s, 488, (free + freeDelta).coerceIn(0, totalClusters))
+        putLe32(s, 492, hint)
+        dev.writeSector(lba, s)
+        freeDelta = 0
+    }
+
+    private fun allocate(n: Int): List<Long>? {
+        val out = ArrayList<Long>(n)
+        var c = hint
+        var wrapped = false
+        while (out.size < n) {
+            if (c >= totalClusters + 2) { if (wrapped) break; wrapped = true; c = 2 }
+            if (fatGet(c) == 0L && !out.contains(c)) out.add(c)
+            c++
+            if (wrapped && c >= hint) break
+        }
+        if (out.size < n) return null
+        for (i in out.indices) fatPut(out[i], if (i + 1 < out.size) out[i + 1] else EOC)
+        hint = out.last() + 1
+        freeDelta -= n
+        return out
+    }
+
+    private fun freeChain(first: Long) {
+        var c = first; var guard = 0
+        while (c >= 2 && c < 0x0FFFFFF8L && guard++ < 0x0FFFFFF0) {
+            val nx = fatGet(c); fatPut(c, 0); freeDelta++
+            if (c < hint) hint = c
+            c = nx
         }
     }
 
-    override fun createDirectory(parentEntry: FileSystemEntry, name: String): Boolean {
-        return try {
-            val parentCluster = parentEntry.inodeOid
-            val cluster = allocateClusters(1)
-                ?: run { Log.e(TAG, "createDirectory: no free cluster"); return false }
+    // ── Cluster I/O ───────────────────────────────────────────────────────────
 
-            // Zero out the new cluster
-            val zeroCluster = ByteArray(header.clusterSize)
-            writeClusterData(cluster, zeroCluster)
+    private fun lba(c: Long) = header.dataAreaLba + (c - 2) * spc
 
-            // Write . and .. entries
-            val (date, time) = currentFatDateTime()
-            val dotEntry = buildDirEntry(".       ", true, cluster, 0, date, time, attr = 0x10)
-            val dotdotCluster = if (parentCluster == header.rootCluster) 0L else parentCluster
-            val dotdotEntry = buildDirEntry("..      ", true, dotdotCluster, 0, date, time, attr = 0x10)
-
-            val dotData = ByteArray(DIR_ENTRY_SIZE * 2)
-            dotEntry.copyInto(dotData, 0)
-            dotdotEntry.copyInto(dotData, DIR_ENTRY_SIZE)
-            writeClusterData(cluster, dotData)
-
-            val shortName = generateShortName(name, parentCluster)
-            val dirEntry = buildDirEntry(shortName, true, cluster, 0, date, time, attr = 0x10)
-            val lfnEntries = buildLfnEntries(name, shortName, checksum83(shortName))
-
-            appendDirEntries(parentCluster, lfnEntries + listOf(dirEntry))
-            blockDevice.flushCache()
-            Log.i(TAG, "createDirectory: $name OK")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "createDirectory failed", e)
-            false
-        }
+    private fun chain(first: Long): List<Long> {
+        val out = ArrayList<Long>(); var c = first; var guard = 0
+        while (c >= 2 && c < 0x0FFFFFF8L && guard++ < 0x0FFFFFF0) { out.add(c); c = fatGet(c) }
+        return out
     }
 
-    override fun deleteEntry(entry: FileSystemEntry): Boolean {
-        return try {
-            val parentCluster = entry.parentOid
-            if (deleteDirEntry(parentCluster, entry.name)) {
-                freeClusters(entry.inodeOid)
-                blockDevice.flushCache()
-                Log.i(TAG, "deleteEntry: ${entry.name} OK")
-                true
-            } else {
-                Log.e(TAG, "deleteEntry: could not find dir entry for ${entry.name}")
-                false
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "deleteEntry failed", e)
-            false
-        }
-    }
-
-    override fun renameEntry(entry: FileSystemEntry, newName: String): Boolean {
-        return try {
-            val parentCluster = entry.parentOid
-            // Delete old entry (keep clusters)
-            deleteDirEntry(parentCluster, entry.name)
-            // Create new entry pointing to same cluster
-            val (date, time) = currentFatDateTime()
-            val shortName = generateShortName(newName, parentCluster)
-            val dirEntry = buildDirEntry(shortName, entry.isDirectory, entry.inodeOid,
-                entry.size, date, time, attr = if (entry.isDirectory) 0x10 else 0x20)
-            val lfnEntries = buildLfnEntries(newName, shortName, checksum83(shortName))
-            appendDirEntries(parentCluster, lfnEntries + listOf(dirEntry))
-            blockDevice.flushCache()
-            Log.i(TAG, "renameEntry: ${entry.name} → $newName OK")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "renameEntry failed", e)
-            false
-        }
-    }
-
-    // ── FAT cluster management ──────────────────────────────────────────────────
-
-    private fun readFatEntry(cluster: Long): Long {
-        val fatOffset = cluster * 4
-        val fatSector = header.fatStartLba + fatOffset / header.bytesPerSector
-        val sectorOffset = (fatOffset % header.bytesPerSector).toInt()
-        val sector = blockDevice.readSector(fatSector) ?: return FAT32_EOC
-        val buf = ByteBuffer.wrap(sector).order(ByteOrder.LITTLE_ENDIAN)
-        buf.position(sectorOffset)
-        return buf.getInt().toLong() and 0x0FFFFFFFL
-    }
-
-    private fun writeFatEntry(cluster: Long, value: Long) {
-        val fatOffset = cluster * 4
-        val fatSector = header.fatStartLba + fatOffset / header.bytesPerSector
-        val sectorOffset = (fatOffset % header.bytesPerSector).toInt()
-        val sector = blockDevice.readSector(fatSector)?.clone() ?: ByteArray(header.bytesPerSector.toInt())
-        val buf = ByteBuffer.wrap(sector).order(ByteOrder.LITTLE_ENDIAN)
-        buf.position(sectorOffset)
-        // Preserve upper 4 bits (reserved), write lower 28 bits
-        val existing = buf.getInt(sectorOffset).toLong() and 0xFFFFFFFF
-        val newVal = (existing and 0xF0000000L) or (value and 0x0FFFFFFFL)
-        buf.position(sectorOffset)
-        buf.putInt(newVal.toInt())
-        blockDevice.writeSector(fatSector, sector)
-        // Write to second FAT if present
-        if (header.fatCount >= 2) {
-            val fat2Sector = fatSector + header.fatSize32
-            val sector2 = blockDevice.readSector(fat2Sector)?.clone() ?: ByteArray(header.bytesPerSector.toInt())
-            sector.copyInto(sector2)
-            blockDevice.writeSector(fat2Sector, sector2)
-        }
-    }
-
-    private fun findFreeCluster(startFrom: Long = 2L): Long? {
-        val maxCluster = header.totalSectors32 / header.sectorsPerCluster + 2
-        var cluster = startFrom
-        while (cluster < maxCluster) {
-            if (readFatEntry(cluster) == FAT32_FREE) return cluster
-            cluster++
-        }
-        return null
-    }
-
-    private fun allocateClusters(count: Int): Long? {
-        if (count == 0) return 0L
-        val clusters = mutableListOf<Long>()
-        var searchFrom = 2L
-        repeat(count) {
-            val c = findFreeCluster(searchFrom) ?: return null
-            clusters.add(c)
-            writeFatEntry(c, FAT32_EOC) // mark as end of chain temporarily
-            searchFrom = c + 1
-        }
-        // Build chain
-        for (i in 0 until clusters.size - 1) {
-            writeFatEntry(clusters[i], clusters[i + 1])
-        }
-        // Last one stays EOC
-        return clusters.first()
-    }
-
-    private fun freeClusters(startCluster: Long) {
-        var cluster = startCluster
-        while (cluster >= 2 && cluster < FAT32_EOC) {
-            val next = readFatEntry(cluster)
-            writeFatEntry(cluster, FAT32_FREE)
-            cluster = next
-        }
-    }
-
-    // ── Cluster I/O ─────────────────────────────────────────────────────────────
-
-    private fun clusterToLba(cluster: Long): Long =
-        header.dataAreaLba + (cluster - 2) * header.sectorsPerCluster
-
-    private fun writeClusterData(cluster: Long, data: ByteArray) {
-        val lba = clusterToLba(cluster)
-        val clusterSize = header.clusterSize
-        val padded = if (data.size < clusterSize) {
-            ByteArray(clusterSize).also { data.copyInto(it) }
-        } else data
-        for (s in 0 until header.sectorsPerCluster) {
-            val off = s * header.bytesPerSector.toInt()
-            val sector = padded.copyOfRange(off, off + header.bytesPerSector.toInt())
-            blockDevice.writeSector(lba + s, sector)
-        }
-    }
-
-    private fun writeClusterChain(startCluster: Long, data: ByteArray) {
-        val clusterSize = header.clusterSize
-        var cluster = startCluster
-        var offset = 0
-        while (cluster >= 2 && cluster < FAT32_EOC && offset < data.size) {
-            val chunk = data.copyOfRange(offset, (offset + clusterSize).coerceAtMost(data.size))
-            writeClusterData(cluster, chunk)
-            offset += clusterSize
-            cluster = readFatEntry(cluster)
-        }
-    }
-
-    // ── Directory entry management ───────────────────────────────────────────────
-
-    private fun appendDirEntries(dirCluster: Long, entries: List<ByteArray>) {
-        // Read cluster chain and find free slots
-        val dirData = readClusterChain(dirCluster).toMutableList()
-        val totalEntries = entries.size
-
-        // Find first run of 'totalEntries' free or deleted slots
-        var startSlot = -1
-        var consecutive = 0
+    private fun readClusters(cl: List<Long>): ByteArray {
+        val out = ByteArray(cl.size * csize)
         var i = 0
-        while (i * DIR_ENTRY_SIZE < dirData.size) {
-            val first = dirData[i * DIR_ENTRY_SIZE].toInt() and 0xFF
-            if (first == 0x00 || first == 0xE5) {
-                if (startSlot < 0) startSlot = i
-                consecutive++
-                if (consecutive >= totalEntries) break
-            } else {
-                startSlot = -1
-                consecutive = 0
-            }
-            i++
+        while (i < cl.size) {
+            var j = i
+            while (j + 1 < cl.size && cl[j + 1] == cl[j] + 1) j++
+            val chunk = dev.readSectors(lba(cl[i]), (j - i + 1) * spc) ?: return out
+            System.arraycopy(chunk, 0, out, i * csize, chunk.size)
+            i = j + 1
         }
-
-        if (startSlot < 0) {
-            // Need to expand — allocate one more cluster
-            val existingClusters = getClusterChain(dirCluster)
-            val newCluster = allocateClusters(1) ?: return
-            writeFatEntry(existingClusters.last(), newCluster)
-            writeClusterData(newCluster, ByteArray(header.clusterSize))
-            // Re-read
-            val newDirData = readClusterChain(dirCluster).toMutableList()
-            startSlot = newDirData.size / DIR_ENTRY_SIZE
-            repeat(totalEntries) { newDirData.addAll(ByteArray(DIR_ENTRY_SIZE).toList()) }
-            writeDirectoryClusterChain(dirCluster, newDirData.toByteArray())
-            return
-        }
-
-        // Write entries into the found slots
-        for ((idx, entry) in entries.withIndex()) {
-            val slot = startSlot + idx
-            val byteOff = slot * DIR_ENTRY_SIZE
-            entry.copyInto(dirData.toByteArray(), byteOff)
-        }
-        // Ensure terminator after
-        val terminatorSlot = startSlot + totalEntries
-        if (terminatorSlot * DIR_ENTRY_SIZE < dirData.size) {
-            dirData[terminatorSlot * DIR_ENTRY_SIZE] = 0x00
-        }
-
-        writeDirectoryClusterChain(dirCluster, dirData.toByteArray())
+        return out
     }
 
-    private fun deleteDirEntry(dirCluster: Long, name: String): Boolean {
-        val data = readClusterChain(dirCluster)
-        val buf = data.clone()
+    private fun writeClusters(cl: List<Long>, data: ByteArray) {
         var i = 0
-        var lfnStart = -1
-        while (i * DIR_ENTRY_SIZE + DIR_ENTRY_SIZE <= buf.size) {
-            val first = buf[i * DIR_ENTRY_SIZE].toInt() and 0xFF
-            if (first == 0x00) break
-            val attr = buf[i * DIR_ENTRY_SIZE + 11].toInt() and 0xFF
-            if (attr == 0x0F) { // LFN
+        while (i < cl.size) {
+            var j = i
+            while (j + 1 < cl.size && cl[j + 1] == cl[j] + 1) j++
+            val buf = ByteArray((j - i + 1) * csize)
+            val from = i * csize
+            val n = minOf(buf.size, data.size - from).coerceAtLeast(0)
+            if (n > 0) System.arraycopy(data, from, buf, 0, n)
+            dev.writeSectors(lba(cl[i]), buf)
+            i = j + 1
+        }
+    }
+
+    // ── Directories ───────────────────────────────────────────────────────────
+
+    private class Item(val off: Int, val count: Int, val name: String, val shortName: String, val attr: Int, val first: Long, val size: Long)
+
+    private fun scan(data: ByteArray): List<Item> {
+        val out = ArrayList<Item>()
+        var i = 0; var lfnStart = -1; val parts = ArrayList<String>()
+        while (i + 32 <= data.size) {
+            val f = data[i].toInt() and 0xFF
+            if (f == 0) break
+            if (f == 0xE5) { i += 32; lfnStart = -1; parts.clear(); continue }
+            val attr = data[i + 11].toInt() and 0xFF
+            if (attr == ATTR_LFN) {
                 if (lfnStart < 0) lfnStart = i
-                i++; continue
+                parts.add(0, lfnChars(data, i)); i += 32; continue
             }
-            val shortName = String(buf, i * DIR_ENTRY_SIZE, 11).trim()
-            val lfnName = extractLfnName(buf, lfnStart, i)
-            val entryName = lfnName.ifEmpty { shortName }
-            if (entryName.equals(name, ignoreCase = true) || shortName.replace(" ", "").equals(
-                    name.replace(".", "").uppercase().take(11), ignoreCase = true)) {
-                // Mark all as deleted
-                val delStart = if (lfnStart >= 0) lfnStart else i
-                for (j in delStart..i) {
-                    buf[j * DIR_ENTRY_SIZE] = DELETED_MARKER
-                }
-                writeDirectoryClusterChain(dirCluster, buf)
-                return true
-            }
-            lfnStart = -1
-            i++
+            if (attr and 0x08 != 0 && attr and ATTR_DIR == 0) { i += 32; lfnStart = -1; parts.clear(); continue }
+            val short = shortOf(data, i)
+            val name = if (parts.isNotEmpty()) parts.joinToString("") else short
+            val first = (le16(data, i + 20) shl 16) or le16(data, i + 26)
+            out.add(Item(if (lfnStart >= 0) lfnStart else i, (i - (if (lfnStart >= 0) lfnStart else i)) / 32 + 1, name, short, attr, first, le32(data, i + 28)))
+            lfnStart = -1; parts.clear(); i += 32
         }
-        return false
+        return out
     }
 
-    private fun writeDirectoryClusterChain(startCluster: Long, data: ByteArray) {
-        val clusterSize = header.clusterSize
-        var cluster = startCluster
-        var offset = 0
-        while (cluster >= 2 && cluster < FAT32_EOC) {
-            val chunk = data.copyOfRange(offset, (offset + clusterSize).coerceAtMost(data.size))
-            writeClusterData(cluster, chunk)
-            offset += clusterSize
-            if (offset >= data.size) break
-            cluster = readFatEntry(cluster)
-        }
-    }
-
-    private fun readClusterChain(startCluster: Long): ByteArray {
-        val chunks = mutableListOf<ByteArray>()
-        var cluster = startCluster
-        var safety = 0
-        while (cluster >= 2 && cluster < FAT32_EOC && safety++ < 100_000) {
-            val lba = clusterToLba(cluster)
-            val clusterData = ByteArray(header.clusterSize)
-            for (s in 0 until header.sectorsPerCluster) {
-                val sectorData = blockDevice.readSector(lba + s) ?: break
-                sectorData.copyInto(clusterData, s * header.bytesPerSector.toInt())
-            }
-            chunks.add(clusterData)
-            cluster = readFatEntry(cluster)
-        }
-        val result = ByteArray(chunks.sumOf { it.size })
-        var pos = 0
-        for (c in chunks) { c.copyInto(result, pos); pos += c.size }
-        return result
-    }
-
-    private fun getClusterChain(startCluster: Long): List<Long> {
-        val result = mutableListOf<Long>()
-        var cluster = startCluster
-        var safety = 0
-        while (cluster >= 2 && cluster < FAT32_EOC && safety++ < 100_000) {
-            result.add(cluster)
-            cluster = readFatEntry(cluster)
-        }
-        return result
-    }
-
-    // ── Directory entry building ─────────────────────────────────────────────────
-
-    private fun buildDirEntry(
-        shortName: String,
-        isDir: Boolean,
-        cluster: Long,
-        size: Long,
-        date: Int,
-        time: Int,
-        attr: Int = if (isDir) 0x10 else 0x20
-    ): ByteArray {
-        val entry = ByteArray(DIR_ENTRY_SIZE)
-        // Name: 8+3 padded with spaces
-        val name8 = shortName.padEnd(8).take(8)
-        val ext3 = (if (shortName.contains('.')) shortName.substringAfterLast('.') else "")
-            .padEnd(3).take(3)
-        for (i in 0..7) entry[i] = name8[i].code.toByte()
-        for (i in 0..2) entry[8 + i] = ext3[i].code.toByte()
-        entry[11] = attr.toByte()
-        // cluster high (bytes 20-21)
-        entry[20] = ((cluster shr 16) and 0xFF).toByte()
-        entry[21] = ((cluster shr 24) and 0xFF).toByte()
-        // time/date
-        entry[22] = (time and 0xFF).toByte()
-        entry[23] = ((time shr 8) and 0xFF).toByte()
-        entry[24] = (date and 0xFF).toByte()
-        entry[25] = ((date shr 8) and 0xFF).toByte()
-        // cluster low (bytes 26-27)
-        entry[26] = (cluster and 0xFF).toByte()
-        entry[27] = ((cluster shr 8) and 0xFF).toByte()
-        // size (bytes 28-31)
-        entry[28] = (size and 0xFF).toByte()
-        entry[29] = ((size shr 8) and 0xFF).toByte()
-        entry[30] = ((size shr 16) and 0xFF).toByte()
-        entry[31] = ((size shr 24) and 0xFF).toByte()
-        return entry
-    }
-
-    private fun buildLfnEntries(longName: String, shortName: String, checksum: Byte): List<ByteArray> {
-        if (longName.length <= 12 && longName == longName.uppercase() && !longName.contains(' ')) {
-            return emptyList() // No LFN needed for simple short names
-        }
-        // Each LFN entry holds 13 UCS-2 characters
-        val chars = longName.toCharArray()
-        val numEntries = (chars.size + 12) / 13
-        val result = mutableListOf<ByteArray>()
-
-        for (seq in numEntries downTo 1) {
-            val entry = ByteArray(DIR_ENTRY_SIZE)
-            val seqByte = if (seq == numEntries) (seq or 0x40).toByte() else seq.toByte()
-            entry[0] = seqByte
-            entry[11] = 0x0F // LFN attribute
-            entry[13] = checksum
-
-            val startChar = (seq - 1) * 13
-            val positions = intArrayOf(1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30)
-            for ((idx, pos) in positions.withIndex()) {
-                val charIdx = startChar + idx
-                val ch: Int = when {
-                    charIdx < chars.size -> chars[charIdx].code
-                    charIdx == chars.size -> 0x0000
-                    else -> 0xFFFF
-                }
-                entry[pos] = (ch and 0xFF).toByte()
-                entry[pos + 1] = ((ch shr 8) and 0xFF).toByte()
-            }
-            result.add(entry)
-        }
-        return result
-    }
-
-    private fun generateShortName(longName: String, dirCluster: Long): String {
-        // Basic 8.3 generation: uppercase, remove spaces, truncate
-        val dot = longName.lastIndexOf('.')
-        val base = (if (dot > 0) longName.substring(0, dot) else longName)
-            .filter { it.isLetterOrDigit() || it in "-_" }
-            .uppercase().take(8).padEnd(8)
-        val ext = (if (dot >= 0) longName.substring(dot + 1) else "")
-            .filter { it.isLetterOrDigit() }.uppercase().take(3)
+    private fun shortOf(d: ByteArray, o: Int): String {
+        var base = String(d, o, 8, Charsets.ISO_8859_1).trimEnd()
+        var ext = String(d, o + 8, 3, Charsets.ISO_8859_1).trimEnd()
+        val nt = d[o + 12].toInt()
+        if (nt and 0x08 != 0) base = base.lowercase()
+        if (nt and 0x10 != 0) ext = ext.lowercase()
         return if (ext.isEmpty()) base else "$base.$ext"
     }
 
-    private fun checksum83(name: String): Byte {
-        val padded = name.filter { it != '.' }.padEnd(11).take(11)
-        var sum = 0
-        for (c in padded) {
-            sum = ((sum and 1 shl 7) or ((sum and 0xFE) ushr 1)) + c.code
-        }
-        return (sum and 0xFF).toByte()
-    }
-
-    private fun extractLfnName(data: ByteArray, lfnStart: Int, sfnIdx: Int): String {
-        if (lfnStart < 0) return ""
+    private fun lfnChars(d: ByteArray, o: Int): String {
         val sb = StringBuilder()
-        for (i in lfnStart until sfnIdx) {
-            val off = i * DIR_ENTRY_SIZE
-            val positions = intArrayOf(1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30)
-            for (pos in positions) {
-                if (off + pos + 1 >= data.size) break
-                val lo = data[off + pos].toInt() and 0xFF
-                val hi = data[off + pos + 1].toInt() and 0xFF
-                val ch = (hi shl 8) or lo
-                if (ch == 0x0000 || ch == 0xFFFF) return sb.toString()
-                sb.append(ch.toChar())
-            }
+        for (p in intArrayOf(1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30)) {
+            val ch = (d[o + p].toInt() and 0xFF) or ((d[o + p + 1].toInt() and 0xFF) shl 8)
+            if (ch == 0 || ch == 0xFFFF) break
+            sb.append(ch.toChar())
         }
         return sb.toString()
     }
 
-    private fun currentFatDateTime(): Pair<Int, Int> {
-        val cal = Calendar.getInstance()
-        val year = cal.get(Calendar.YEAR) - 1980
-        val month = cal.get(Calendar.MONTH) + 1
-        val day = cal.get(Calendar.DAY_OF_MONTH)
-        val hour = cal.get(Calendar.HOUR_OF_DAY)
-        val min = cal.get(Calendar.MINUTE)
-        val sec = cal.get(Calendar.SECOND) / 2
-        val date = (year shl 9) or (month shl 5) or day
-        val time = (hour shl 11) or (min shl 5) or sec
-        return Pair(date, time)
+    private class Dir(val first: Long, val parentFirst: Long)
+
+    private fun rootDir() = Dir(header.rootCluster, 0)
+
+    private fun dirForPath(path: String): Dir? {
+        var cur = rootDir()
+        for (part in path.trim('/').split('/').filter { it.isNotEmpty() }) {
+            val it = scan(readClusters(chain(cur.first))).firstOrNull { x -> x.name.equals(part, true) && x.attr and ATTR_DIR != 0 } ?: return null
+            cur = Dir(it.first, if (cur.first == header.rootCluster) 0 else cur.first)
+        }
+        return cur
     }
+
+    private fun dirOf(e: FileSystemEntry) = if (e.path == "/" || e.path.isEmpty()) rootDir() else dirForPath(e.path)
+
+    // ── Names ─────────────────────────────────────────────────────────────────
+
+    private val illegalShort = "\"*+,/:;<=>?[\\]|"
+
+    private fun toShortParts(name: String): Pair<String, String> {
+        val dot = name.lastIndexOf('.')
+        var base = if (dot > 0) name.substring(0, dot) else name
+        var ext = if (dot > 0) name.substring(dot + 1) else ""
+        fun clean(s: String) = s.uppercase().filter { it != ' ' && it != '.' && it.code in 0x21..0x7E && it !in illegalShort }.ifEmpty { "_" }
+        base = clean(base); ext = if (ext.isEmpty()) "" else clean(ext)
+        return base to ext.take(3)
+    }
+
+    /** True when [name] is exactly representable as an upper-case 8.3 name (no LFN needed). */
+    private fun fitsShort(name: String): Boolean {
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot + 1) else ""
+        fun ok(s: String) = s.all { it.code in 0x21..0x7E && it !in illegalShort && !it.isLowerCase() && it != '.' }
+        return name.indexOf('.') == dot && base.length in 1..8 && ext.length <= 3 && ok(base) && ok(ext) && name != "." && name != ".."
+    }
+
+    private fun uniqueShort(name: String, existing: Set<String>): String {
+        val (base, ext) = toShortParts(name)
+        fun pack(b: String, e: String) = b.padEnd(8) + e.padEnd(3)
+        if (fitsShort(name)) return pack(base, ext)
+        var n = 1
+        while (true) {
+            val tail = "~$n"
+            val cand = pack(base.take(8 - tail.length) + tail, ext)
+            if (cand !in existing) return cand
+            n++
+        }
+    }
+
+    private fun checksum(short11: ByteArray): Int {
+        var s = 0
+        for (b in short11) s = (((s and 1) shl 7) or ((s and 0xFF) ushr 1)) + (b.toInt() and 0xFF) and 0xFF
+        return s
+    }
+
+    private fun buildEntries(name: String, short11: String, attr: Int, first: Long, size: Long, ms: Long, createMs: Long = ms): ByteArray {
+        val shortBytes = short11.toByteArray(Charsets.ISO_8859_1)
+        val needLfn = name != "." && name != ".." && !fitsShort(name)
+        val lfnCount = if (needLfn) (name.length + 12) / 13 else 0
+        val out = ByteArray((lfnCount + 1) * 32)
+        val cs = checksum(shortBytes)
+        for (k in 0 until lfnCount) {            // entry order on disk: highest sequence first
+            val seq = lfnCount - k
+            val o = k * 32
+            out[o] = (seq or (if (seq == lfnCount) 0x40 else 0)).toByte()
+            out[o + 11] = ATTR_LFN.toByte(); out[o + 13] = cs.toByte()
+            val positions = intArrayOf(1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30)
+            for ((q, p) in positions.withIndex()) {
+                val idx = (seq - 1) * 13 + q
+                val ch = when { idx < name.length -> name[idx].code; idx == name.length -> 0; else -> 0xFFFF }
+                out[o + p] = ch.toByte(); out[o + p + 1] = (ch shr 8).toByte()
+            }
+        }
+        val o = lfnCount * 32
+        System.arraycopy(shortBytes, 0, out, o, 11)
+        out[o + 11] = attr.toByte()
+        val (cd, ct) = fatDate(createMs); val (wd, wt) = fatDate(ms)
+        putLe16(out, o + 14, ct); putLe16(out, o + 16, cd); putLe16(out, o + 18, wd)
+        putLe16(out, o + 20, (first shr 16).toInt()); putLe16(out, o + 22, wt); putLe16(out, o + 24, wd)
+        putLe16(out, o + 26, (first and 0xFFFF).toInt()); putLe32(out, o + 28, size)
+        return out
+    }
+
+    private fun fatDate(ms: Long): Pair<Int, Int> {
+        val c = Calendar.getInstance().apply { timeInMillis = ms }
+        val d = ((c.get(Calendar.YEAR) - 1980).coerceIn(0, 127) shl 9) or ((c.get(Calendar.MONTH) + 1) shl 5) or c.get(Calendar.DAY_OF_MONTH)
+        val t = (c.get(Calendar.HOUR_OF_DAY) shl 11) or (c.get(Calendar.MINUTE) shl 5) or (c.get(Calendar.SECOND) / 2)
+        return d to t
+    }
+
+    private fun validName(name: String) = name.isNotEmpty() && name.length <= 255 && name != "." && name != ".." &&
+        !name.endsWith(" ") && !name.endsWith(".") && name.none { it.code < 0x20 || it in "\"*/:<>?\\|" }
+
+    // ── Insert ────────────────────────────────────────────────────────────────
+
+    private class Buf(val first: Long, var clusters: List<Long>, var data: ByteArray)
+
+    private fun open(d: Dir): Buf { val cl = chain(d.first); return Buf(d.first, cl, readClusters(cl)) }
+
+    private fun insert(buf: Buf, entries: ByteArray): Boolean {
+        val need = entries.size / 32
+        var i = 0; var runStart = -1; var run = 0; var end = -1
+        while (i + 32 <= buf.data.size) {
+            val f = buf.data[i].toInt() and 0xFF
+            if (f == 0) { end = i; break }
+            if (f == 0xE5) { if (run == 0) runStart = i; run++; if (run >= need) { System.arraycopy(entries, 0, buf.data, runStart, entries.size); return true } }
+            else { run = 0; runStart = -1 }
+            i += 32
+        }
+        var at = if (end >= 0) end else buf.data.size
+        if (run > 0 && end >= 0) at = runStart
+        while (at + entries.size > buf.data.size) {
+            val c = allocate(1) ?: return false
+            fatPut(buf.clusters.last(), c[0])
+            writeClusters(c, ByteArray(csize))
+            buf.clusters = buf.clusters + c[0]
+            buf.data = buf.data + ByteArray(csize)
+        }
+        System.arraycopy(entries, 0, buf.data, at, entries.size)
+        return true
+    }
+
+    private fun shortsIn(data: ByteArray): Set<String> {
+        val set = HashSet<String>(); var i = 0
+        while (i + 32 <= data.size) {
+            val f = data[i].toInt() and 0xFF
+            if (f == 0) break
+            if (f != 0xE5 && (data[i + 11].toInt() and 0xFF) != ATTR_LFN) set.add(String(data, i, 11, Charsets.ISO_8859_1))
+            i += 32
+        }
+        return set
+    }
+
+    // ── FileSystemWriter ──────────────────────────────────────────────────────
+
+    override fun writeFile(parentEntry: FileSystemEntry, name: String, data: ByteArray): Boolean = guarded("writeFile $name") {
+        if (!validName(name) || data.size.toLong() > 0xFFFFFFFFL) return@guarded false
+        val dir = dirOf(parentEntry) ?: return@guarded false
+        val buf = open(dir)
+        if (scan(buf.data).any { it.name.equals(name, true) }) return@guarded false
+        val n = (data.size + csize - 1) / csize
+        val cl = allocate(n) ?: return@guarded false
+        writeClusters(cl, data)
+        val short = uniqueShort(name, shortsIn(buf.data))
+        val ents = buildEntries(name, short, ATTR_ARCHIVE, cl.firstOrNull() ?: 0L, data.size.toLong(), System.currentTimeMillis())
+        if (!insert(buf, ents)) { cl.firstOrNull()?.let { freeChain(it) }; return@guarded false }
+        flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+    }
+
+    override fun createDirectory(parentEntry: FileSystemEntry, name: String): Boolean = guarded("createDirectory $name") {
+        if (!validName(name)) return@guarded false
+        val dir = dirOf(parentEntry) ?: return@guarded false
+        val buf = open(dir)
+        if (scan(buf.data).any { it.name.equals(name, true) }) return@guarded false
+        val c = allocate(1) ?: return@guarded false
+        val now = System.currentTimeMillis()
+        val body = ByteArray(csize)
+        val dotParent = if (dir.first == header.rootCluster) 0L else dir.first
+        System.arraycopy(buildEntries(".", ".          ", ATTR_DIR, c[0], 0, now), 0, body, 0, 32)
+        System.arraycopy(buildEntries("..", "..         ", ATTR_DIR, dotParent, 0, now), 0, body, 32, 32)
+        writeClusters(c, body)
+        val short = uniqueShort(name, shortsIn(buf.data))
+        if (!insert(buf, buildEntries(name, short, ATTR_DIR, c[0], 0, now))) { freeChain(c[0]); return@guarded false }
+        flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+    }
+
+    override fun deleteEntry(entry: FileSystemEntry): Boolean = guarded("deleteEntry ${entry.name}") {
+        val dir = dirForPath(entry.path.substringBeforeLast('/', "")) ?: return@guarded false
+        val buf = open(dir)
+        val it = scan(buf.data).firstOrNull { x -> x.name.equals(entry.name, true) } ?: return@guarded false
+        remove(buf, it)
+        flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+    }
+
+    private fun remove(buf: Buf, it: Item) {
+        if (it.attr and ATTR_DIR != 0 && it.first >= 2) {
+            val sub = Buf(it.first, chain(it.first), readClusters(chain(it.first)))
+            for (c in scan(sub.data)) if (c.name != "." && c.name != "..") remove(sub, c)
+            writeClusters(sub.clusters, sub.data)
+        }
+        if (it.first >= 2) freeChain(it.first)
+        for (k in 0 until it.count) buf.data[it.off + k * 32] = 0xE5.toByte()
+    }
+
+    override fun renameEntry(entry: FileSystemEntry, newName: String): Boolean = guarded("renameEntry ${entry.name}") {
+        if (!validName(newName)) return@guarded false
+        val dir = dirForPath(entry.path.substringBeforeLast('/', "")) ?: return@guarded false
+        val buf = open(dir)
+        val items = scan(buf.data)
+        val it = items.firstOrNull { x -> x.name.equals(entry.name, true) } ?: return@guarded false
+        if (!it.name.equals(newName, true) && items.any { x -> x.name.equals(newName, true) }) return@guarded false
+        val shortOff = it.off + (it.count - 1) * 32
+        val old = buf.data.copyOfRange(shortOff, shortOff + 32)
+        for (k in 0 until it.count) buf.data[it.off + k * 32] = 0xE5.toByte()
+        val short = uniqueShort(newName, shortsIn(buf.data))
+        val ents = buildEntries(newName, short, it.attr, it.first, it.size, System.currentTimeMillis())
+        System.arraycopy(old, 13, ents, ents.size - 32 + 13, 11)     // keep create time/date, access date
+        if (!insert(buf, ents)) return@guarded false
+        flushFat(); writeClusters(buf.clusters, buf.data); dev.flushCache()
+    }
+
+    private inline fun guarded(what: String, block: () -> Boolean): Boolean = try {
+        block().also { if (!it) Log.w(TAG, "FAT32 $what failed") }
+    } catch (e: Exception) { Log.e(TAG, "FAT32 $what threw", e); false }
+
+    private fun le16(a: ByteArray, o: Int): Long = ((a[o].toLong() and 0xFF) or ((a[o + 1].toLong() and 0xFF) shl 8))
+    private fun le32(a: ByteArray, o: Int): Long = le16(a, o) or (le16(a, o + 2) shl 16)
+    private fun putLe16(a: ByteArray, o: Int, v: Int) { a[o] = v.toByte(); a[o + 1] = (v shr 8).toByte() }
+    private fun putLe32(a: ByteArray, o: Int, v: Long) { for (k in 0..3) a[o + k] = (v shr (8 * k)).toByte() }
 }
