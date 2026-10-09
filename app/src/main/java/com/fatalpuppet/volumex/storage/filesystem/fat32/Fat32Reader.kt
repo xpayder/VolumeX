@@ -65,6 +65,31 @@ class Fat32Reader(
         return if (entry.size > 0) raw.copyOf(entry.size.coerceAtMost(raw.size.toLong()).toInt()) else raw
     }
 
+    override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
+        val h = header ?: return false
+        if (entry.size <= 0) return true
+        val bpc = h.clusterSize
+        val maxRun = ((1 shl 20) / bpc).coerceAtLeast(1)
+        var remaining = entry.size
+        var cluster = entry.inodeOid
+        var total = 0L
+        while (remaining > 0 && cluster >= 2 && cluster < Fat32Constants.FAT32_EOC_MIN) {
+            val runStart = cluster
+            var runLen = 1
+            var nxt = nextCluster(cluster)
+            while (runLen < maxRun && nxt == runStart + runLen && runLen.toLong() * bpc < remaining) {
+                runLen++; nxt = nextCluster(runStart + runLen - 1)
+            }
+            val data = blockDevice.readSectors(clusterToLba(runStart), runLen * h.sectorsPerCluster) ?: return false
+            val n = minOf(remaining, data.size.toLong()).toInt()
+            out.write(data, 0, n)
+            remaining -= n; total += n
+            onProgress?.invoke(total)
+            cluster = nxt
+        }
+        return remaining <= 0
+    }
+
     override fun searchFiles(query: String, volumeIndex: Int): List<FileSystemEntry> {
         val results = mutableListOf<FileSystemEntry>()
         searchRecursive("/", query.lowercase(), results, depth = 0, maxDepth = 12)
@@ -100,15 +125,8 @@ class Fat32Reader(
         var cluster = startCluster
         var safety = 0
         while (cluster >= 2 && cluster < Fat32Constants.FAT32_EOC_MIN && safety++ < 0x0FFFFFF0) {
-            val lba = clusterToLba(cluster)
-            val clusterData = ByteArray(clusterSize)
-            var offset = 0
-            for (s in 0 until h.sectorsPerCluster) {
-                val sectorData = blockDevice.readSector(lba + s) ?: break
-                sectorData.copyInto(clusterData, offset)
-                offset += sectorData.size
-            }
-            chunks.add(if (offset < clusterSize) clusterData.copyOf(offset) else clusterData)
+            val clusterData = blockDevice.readSectors(clusterToLba(cluster), h.sectorsPerCluster)
+            chunks.add(clusterData ?: ByteArray(0))
             cluster = nextCluster(cluster)
         }
         val total = chunks.sumOf { it.size }

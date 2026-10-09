@@ -78,6 +78,32 @@ class ExFatReader(
         return raw.copyOf(entry.size.coerceAtMost(raw.size.toLong()).toInt())
     }
 
+    override fun readFileTo(entry: FileSystemEntry, out: java.io.OutputStream, onProgress: ((Long) -> Unit)?): Boolean {
+        val b = boot ?: return false
+        if (entry.size <= 0) return true
+        val bpc = b.bytesPerCluster
+        val maxRun = ((1 shl 20) / bpc).coerceAtLeast(1)
+        var remaining = entry.size
+        var cluster = entry.inodeOid
+        var total = 0L
+        fun nextOf(c: Long) = if (entry.contiguous) c + 1 else readFatEntry(c)
+        while (remaining > 0 && cluster >= 2 && cluster < b.clusterCount + 2) {
+            val runStart = cluster
+            var runLen = 1
+            var nxt = nextOf(cluster)
+            while (runLen < maxRun && nxt == runStart + runLen && runLen.toLong() * bpc < remaining) {
+                runLen++; nxt = nextOf(runStart + runLen - 1)
+            }
+            val data = blockDevice.readSectors(clusterToLba(runStart), runLen * b.sectorsPerCluster) ?: return false
+            val n = minOf(remaining, data.size.toLong()).toInt()
+            out.write(data, 0, n)
+            remaining -= n; total += n
+            onProgress?.invoke(total)
+            cluster = nxt
+        }
+        return remaining <= 0
+    }
+
     override fun unmount() { boot = null }
 
     // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -102,11 +128,7 @@ class ExFatReader(
         while (cluster >= 2 && (contiguous || cluster < FAT_EOC) && safety++ < 1_000_000) {
             if (contiguous && safety > contiguousCount) break
             val lba = clusterToLba(cluster)
-            val clusterData = ByteArray(b.bytesPerCluster)
-            for (s in 0 until b.sectorsPerCluster) {
-                val sd = blockDevice.readSector(lba + s) ?: break
-                sd.copyInto(clusterData, s * b.bytesPerSector)
-            }
+            val clusterData = blockDevice.readSectors(lba, b.sectorsPerCluster) ?: ByteArray(b.bytesPerCluster)
             chunks.add(clusterData)
             cluster = if (contiguous) cluster + 1 else readFatEntry(cluster)
         }

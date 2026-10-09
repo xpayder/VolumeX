@@ -37,12 +37,7 @@ class HfsPlusBTreeParser(
         val sectorSize = reader.sectorSize().toLong()
         val sectorsPerBlock = blockSize / sectorSize
         val lba = partitionStartLba + blockNum.toLong() * sectorsPerBlock
-        val result = ByteArray(blockSize.toInt())
-        for (i in 0 until sectorsPerBlock) {
-            val sector = reader.readSector(lba + i) ?: return null
-            System.arraycopy(sector, 0, result, (i * sectorSize).toInt(), sectorSize.toInt())
-        }
-        return result
+        return reader.readSectors(lba, sectorsPerBlock.toInt())
     }
 
     /**

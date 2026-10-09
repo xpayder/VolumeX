@@ -28,13 +28,7 @@ class ApfsBTreeParser(
     fun readBlock(blockAddr: Long): ByteArray? {
         if (blockAddr < 0) return null
         val lba = partitionStartLba + blockAddr * sectorsPerBlock
-        val result = ByteArray(blockSize.toInt())
-        val sectorSize = reader.sectorSize()
-        for (i in 0 until sectorsPerBlock) {
-            val sector = reader.readSector(lba + i) ?: return null
-            System.arraycopy(sector, 0, result, (i * sectorSize).toInt(), sectorSize)
-        }
-        return result
+        return reader.readSectors(lba, sectorsPerBlock.toInt())
     }
 
     /**

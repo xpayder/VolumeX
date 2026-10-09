@@ -705,15 +705,65 @@ class UsbBlockDeviceReader(
         claimed = false
     }
 
-    override fun readSector(lba: Long): ByteArray? {
+    // 4 KB-aligned read cache (FAT/directory/B-tree access is heavily repetitive); write-through invalidation.
+    private val cache = object : LinkedHashMap<Long, ByteArray>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 512
+    }
+    private val chunkSectors = 8
+    private val maxTransferSectors = 256   // 128 KB per SCSI command
+
+    private fun rawRead(lba: Long, count: Int): ByteArray? {
         val executor = scsiExecutor ?: return null
-        return executor.read10(lba = lba, blockCount = 1, blockSize = sectorSize()).data
+        val out = ByteArray(count * 512)
+        var done = 0
+        while (done < count) {
+            val n = minOf(maxTransferSectors, count - done)
+            val data = executor.read10(lba = lba + done, blockCount = n, blockSize = 512).data ?: return null
+            if (data.size < n * 512) return null
+            System.arraycopy(data, 0, out, done * 512, n * 512)
+            done += n
+        }
+        return out
+    }
+
+    override fun readSector(lba: Long): ByteArray? {
+        val chunk = lba / chunkSectors
+        val cached = synchronized(cache) { cache[chunk] }
+        val data = cached ?: (rawRead(chunk * chunkSectors, chunkSectors) ?: return rawRead(lba, 1))
+            .also { d -> synchronized(cache) { cache[chunk] = d } }
+        val o = ((lba % chunkSectors) * 512).toInt()
+        return data.copyOfRange(o, o + 512)
+    }
+
+    override fun readSectors(startLba: Long, count: Int): ByteArray? {
+        if (count <= 0) return ByteArray(0)
+        if (count < chunkSectors) return super.readSectors(startLba, count)   // via the cache
+        return rawRead(startLba, count)
+    }
+
+    private fun invalidate(lba: Long, count: Int) = synchronized(cache) {
+        for (c in (lba / chunkSectors)..((lba + count - 1) / chunkSectors)) cache.remove(c)
     }
 
     override fun writeSector(lba: Long, data: ByteArray): Boolean {
         val executor = scsiExecutor ?: return false
         val result = executor.write10(lba = lba, data = data, blockSize = sectorSize())
+        invalidate(lba, 1)
         return result.success
+    }
+
+    override fun writeSectors(startLba: Long, data: ByteArray): Boolean {
+        val executor = scsiExecutor ?: return false
+        val total = data.size / 512
+        var done = 0
+        while (done < total) {
+            val n = minOf(maxTransferSectors, total - done)
+            val r = executor.write10(lba = startLba + done, data = data.copyOfRange(done * 512, (done + n) * 512), blockSize = 512)
+            if (!r.success) { invalidate(startLba, total); return false }
+            done += n
+        }
+        invalidate(startLba, total)
+        return true
     }
 
     override fun flushCache(): Boolean {
