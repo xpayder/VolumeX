@@ -85,6 +85,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             VolumeXTheme {
                 var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+                var settingsReturn by remember { mutableStateOf<Screen>(Screen.Home) }
+
+                androidx.activity.compose.BackHandler(enabled = currentScreen !is Screen.Home) {
+                    when (currentScreen) {
+                        is Screen.FilePreview -> currentScreen = Screen.FileBrowser(0)
+                        is Screen.FileBrowser -> when {
+                            fileBrowserViewModel.selectedEntries.value.isNotEmpty() -> fileBrowserViewModel.clearSelection()
+                            fileBrowserViewModel.breadcrumbs.value.size > 1 -> fileBrowserViewModel.navigateUp()
+                            else -> currentScreen = Screen.Home
+                        }
+                        is Screen.Settings -> currentScreen = settingsReturn
+                        else -> currentScreen = Screen.Home
+                    }
+                }
 
                 // targetSdk 36+ forces edge-to-edge: keep content clear of status/nav bars and the cutout.
                 androidx.compose.foundation.layout.Box(
@@ -98,6 +112,7 @@ class MainActivity : ComponentActivity() {
                     is Screen.Home -> {
                         HomeScreen(
                             viewModel = mainViewModel,
+                            onOpenSettings = { settingsReturn = Screen.Home; currentScreen = Screen.Settings },
                             onBrowseVolume = { volumeInfo, idx ->
                                 val state = mainViewModel.deviceState.value
                                 if (state is com.fatalpuppet.volumex.ui.viewmodel.DeviceState.Connected) {
@@ -131,13 +146,19 @@ class MainActivity : ComponentActivity() {
                             viewModel = fileBrowserViewModel,
                             onNavigateBack = { currentScreen = Screen.Home },
                             onOpenPreview = { entry -> currentScreen = Screen.FilePreview(entry) },
-                            onOpenSettings = { currentScreen = Screen.Settings }
+                            onOpenSettings = { settingsReturn = currentScreen; currentScreen = Screen.Settings }
                         )
                     }
                     is Screen.FilePreview -> {
                         val previewEntry = (screen as Screen.FilePreview).entry
+                        val browserEntries by fileBrowserViewModel.entries.collectAsState()
+                        val browserWritable by fileBrowserViewModel.writable.collectAsState()
                         FilePreviewScreen(
                             entry = previewEntry,
+                            siblings = if (previewEntry.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.IMAGE)
+                                browserEntries.filter { it.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.IMAGE } else listOf(previewEntry),
+                            canDelete = browserWritable,
+                            onDelete = { fileBrowserViewModel.deleteEntries(listOf(it)) },
                             onNavigateBack = { currentScreen = Screen.FileBrowser(0) }
                         )
                     }
@@ -146,7 +167,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             showHiddenFiles = showHidden,
                             onToggleHiddenFiles = { fileBrowserViewModel.toggleHidden() },
-                            onNavigateBack = { currentScreen = Screen.FileBrowser(0) }
+                            onNavigateBack = { currentScreen = settingsReturn }
                         )
                     }
                     is Screen.Transfers -> {

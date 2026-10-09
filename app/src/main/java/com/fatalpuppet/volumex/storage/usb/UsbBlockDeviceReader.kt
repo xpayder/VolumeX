@@ -726,6 +726,7 @@ class UsbBlockDeviceReader(
         return out
     }
 
+    @Synchronized
     override fun readSector(lba: Long): ByteArray? {
         val chunk = lba / chunkSectors
         val cached = synchronized(cache) { cache[chunk] }
@@ -735,6 +736,7 @@ class UsbBlockDeviceReader(
         return data.copyOfRange(o, o + 512)
     }
 
+    @Synchronized
     override fun readSectors(startLba: Long, count: Int): ByteArray? {
         if (count <= 0) return ByteArray(0)
         if (count < chunkSectors) return super.readSectors(startLba, count)   // via the cache
@@ -745,6 +747,7 @@ class UsbBlockDeviceReader(
         for (c in (lba / chunkSectors)..((lba + count - 1) / chunkSectors)) cache.remove(c)
     }
 
+    @Synchronized
     override fun writeSector(lba: Long, data: ByteArray): Boolean {
         val executor = scsiExecutor ?: return false
         val result = executor.write10(lba = lba, data = data, blockSize = sectorSize())
@@ -752,6 +755,7 @@ class UsbBlockDeviceReader(
         return result.success
     }
 
+    @Synchronized
     override fun writeSectors(startLba: Long, data: ByteArray): Boolean {
         val executor = scsiExecutor ?: return false
         val total = data.size / 512
@@ -766,6 +770,7 @@ class UsbBlockDeviceReader(
         return true
     }
 
+    @Synchronized
     override fun flushCache(): Boolean {
         val executor = scsiExecutor ?: return false
         val command = byteArrayOf(

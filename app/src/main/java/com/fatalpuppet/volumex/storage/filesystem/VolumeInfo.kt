@@ -9,8 +9,13 @@ data class VolumeInfo(
     val freeBlocks: Long = 0L,
     val isEncrypted: Boolean = false,
     val numFiles: Long = 0L,
-    val numDirectories: Long = 0L
+    val numDirectories: Long = 0L,
+    /** true when [freeBlocks] is an actual measurement (0 free is then a real value). */
+    val freeKnown: Boolean = false
 ) {
+    val usedFraction: Float get() = if (freeKnown && totalBlocks > 0) ((totalBlocks - freeBlocks).toFloat() / totalBlocks).coerceIn(0f, 1f) else 0f
+    val usedSize: Long get() = if (freeKnown) (totalBlocks - freeBlocks).coerceAtLeast(0) * blockSize else 0L
+    val formattedUsedSize: String get() = formatBytes(usedSize)
     val totalSize: Long get() = totalBlocks * blockSize
     val freeSize: Long get() = freeBlocks * blockSize
 

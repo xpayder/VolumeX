@@ -65,6 +65,7 @@ class HfsPlusReader(
             totalBlocks = vh.totalBlocks.toLong(),
             blockSize = vh.blockSize.toLong(),
             freeBlocks = vh.freeBlocks.toLong(),
+            freeKnown = true,
             isEncrypted = false,
             numFiles = vh.fileCount.toLong(),
             numDirectories = vh.folderCount.toLong()

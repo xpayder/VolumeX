@@ -66,6 +66,8 @@ object ApfsVolumeSuperblockParser {
         val snapMetaTreeOid = buf.getLong()
 
         // apfs_revert_to_xid (0xA0) and apfs_revert_to_sblock_oid (0xA8)
+        buf.position(0x58)
+        val allocCount = buf.getLong()           // apfs_fs_alloc_count (blocks this volume uses)
         buf.position(0xB0)
         // apfs_next_obj_id at 0xB0
         val nextObjId = buf.getLong()
@@ -108,7 +110,8 @@ object ApfsVolumeSuperblockParser {
             volUuid = volUuid,
             lastModTime = lastModTime,
             fsFlags = fsFlags,
-            volumeName = volumeName
+            volumeName = volumeName,
+            allocCount = allocCount
         )
     }
 }

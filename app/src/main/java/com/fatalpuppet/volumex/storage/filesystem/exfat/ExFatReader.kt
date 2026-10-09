@@ -46,12 +46,15 @@ class ExFatReader(
     override fun getVolumeInfos(): List<VolumeInfo> {
         val b = boot ?: return emptyList()
         val volumeLabel = readVolumeLabel() ?: "exFAT Volume"
+        val free = freeClusterCount()
         return listOf(
             VolumeInfo(
                 name = volumeLabel,
                 type = "exFAT",
                 totalBlocks = b.clusterCount.toLong(),
-                blockSize = b.bytesPerCluster.toLong()
+                blockSize = b.bytesPerCluster.toLong(),
+                freeBlocks = free ?: 0L,
+                freeKnown = free != null
             )
         )
     }
@@ -108,6 +111,37 @@ class ExFatReader(
         name = "/", path = "/", isDirectory = true, size = 0, createdAt = 0, modifiedAt = 0,
         inodeOid = boot?.rootDirectoryCluster ?: 0L
     )
+
+    /** Free clusters, counted from the allocation bitmap (null if it cannot be read). */
+    private fun freeClusterCount(): Long? {
+        val b = boot ?: return null
+        val root = try { readClusterChain(b.rootDirectoryCluster) } catch (_: Exception) { return null }
+        var i = 0
+        while (i + 32 <= root.size) {
+            val t = root[i].toInt() and 0xFF
+            if (t == 0) break
+            if (t == 0x81) {
+                val first = ByteBuffer.wrap(root, i + 20, 4).order(ByteOrder.LITTLE_ENDIAN).getInt().toLong() and 0xFFFFFFFFL
+                val len = ByteBuffer.wrap(root, i + 24, 8).order(ByteOrder.LITTLE_ENDIAN).getLong()
+                if (len <= 0 || len > 64L * 1024 * 1024) return null
+                val sectors = ((len + b.bytesPerSector - 1) / b.bytesPerSector).toInt()
+                val bm = blockDevice.readSectors(clusterToLba(first), sectors) ?: return null
+                var used = 0L
+                val bits = b.clusterCount
+                var n = 0L
+                for (byteIdx in 0 until len.toInt()) {
+                    val v = bm[byteIdx].toInt() and 0xFF
+                    val take = minOf(8L, bits - n).toInt().coerceAtLeast(0)
+                    if (take <= 0) break
+                    used += Integer.bitCount(v and ((1 shl take) - 1))
+                    n += take
+                }
+                return bits - used
+            }
+            i += 32
+        }
+        return null
+    }
 
     override fun unmount() { boot = null }
 

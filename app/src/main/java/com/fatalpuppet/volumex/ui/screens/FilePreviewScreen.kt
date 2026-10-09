@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,60 +34,69 @@ import com.fatalpuppet.volumex.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilePreviewScreen(
     entry: FileSystemEntry,
+    siblings: List<FileSystemEntry> = listOf(entry),
+    canDelete: Boolean = false,
+    onDelete: (FileSystemEntry) -> Unit = {},
     onNavigateBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val contentUri = remember(entry.inodeOid, entry.path) {
-        DriveFileProvider.buildUri(entry.inodeOid, entry.path)
-    }
+    val items = remember(entry, siblings) { if (siblings.any { it.path == entry.path }) siblings else listOf(entry) }
+    val startIndex = remember(entry, items) { items.indexOfFirst { it.path == entry.path }.coerceAtLeast(0) }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = startIndex) { items.size }
+    val current = items[pager.currentPage.coerceIn(0, items.lastIndex)]
+    var confirmDelete by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(DeepNavy, DarkNavy)))
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(GlassWhite8)
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
+                IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
+                Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                    Text(current.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text(if (items.size > 1) "${pager.currentPage + 1} of ${items.size}" else current.formattedSize, color = TextTertiary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
-                Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = entry.name,
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                    Text(entry.formattedSize, color = TextTertiary, fontSize = 12.sp)
-                }
+                IconButton(onClick = {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(current.extension) ?: "*/*"
+                        putExtra(android.content.Intent.EXTRA_STREAM, DriveFileProvider.buildUri(current.inodeOid, current.path))
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(intent, "Share"))
+                }) { Icon(Icons.Default.Share, "Share", tint = TextSecondary) }
+                if (canDelete) IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete", tint = TextSecondary) }
             }
 
-            // Preview area
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                when (entry.fileType) {
-                    FileType.IMAGE -> ImagePreview(contentUri, entry.name)
-                    FileType.VIDEO -> VideoPreview(contentUri, entry.name)
-                    FileType.AUDIO -> AudioPreview(contentUri, entry.name)
-                    else -> GenericPreview(entry.name)
+            if (current.fileType == FileType.IMAGE) {
+                androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), key = { items[it].path }) { page ->
+                    val e = items[page]
+                    Box(Modifier.fillMaxSize().padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                        if (e.fileType == FileType.IMAGE) ImagePreview(DriveFileProvider.buildUri(e.inodeOid, e.path), e.name)
+                        else GenericPreview(e.name)
+                    }
+                }
+            } else {
+                val uri = remember(current.inodeOid, current.path) { DriveFileProvider.buildUri(current.inodeOid, current.path) }
+                Box(modifier = Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
+                    when (current.fileType) {
+                        FileType.VIDEO -> VideoPreview(uri, current.name)
+                        FileType.AUDIO -> AudioPreview(uri, current.name)
+                        else -> GenericPreview(current.name)
+                    }
                 }
             }
+        }
+        if (confirmDelete) {
+            AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                title = { Text("Delete \"${current.name}\"?", color = TextPrimary) },
+                text = { Text("This permanently removes it from the drive.", color = TextSecondary) },
+                confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete(current); onNavigateBack() }) { Text("Delete", color = AccentRed) } },
+                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = TextTertiary) } },
+                containerColor = DarkCard
+            )
         }
     }
 }

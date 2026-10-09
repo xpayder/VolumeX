@@ -19,7 +19,8 @@ data class ApfsVolumeSuperblock(
     val volUuid: ByteArray,
     val lastModTime: Long,
     val fsFlags: Long,
-    val volumeName: String
+    val volumeName: String,
+    val allocCount: Long = 0L
 ) {
     // Backward compat
     val rootDirectoryObjectId: Long get() = rootTreeOid

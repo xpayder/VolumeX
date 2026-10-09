@@ -36,13 +36,28 @@ class Fat32Reader(
 
     override fun getVolumeInfos(): List<VolumeInfo> {
         val h = header ?: return emptyList()
+        // free space from the FSInfo sector (free cluster count), when present and valid
+        var freeSectors = 0L; var known = false
+        try {
+            val boot = blockDevice.readSector(partitionStartLba)
+            val fsInfoSec = if (boot != null) (boot[48].toInt() and 0xFF) or ((boot[49].toInt() and 0xFF) shl 8) else 0
+            if (fsInfoSec in 1..0xFFFE) {
+                val fi = blockDevice.readSector(partitionStartLba + fsInfoSec)
+                if (fi != null && fi[0].toInt() == 0x52 && fi[1].toInt() == 0x52 && fi[2].toInt() == 0x61 && fi[3].toInt() == 0x41) {
+                    val free = ((fi[488].toLong() and 0xFF) or ((fi[489].toLong() and 0xFF) shl 8) or ((fi[490].toLong() and 0xFF) shl 16) or ((fi[491].toLong() and 0xFF) shl 24))
+                    if (free != 0xFFFFFFFFL) { freeSectors = free * h.sectorsPerCluster; known = true }
+                }
+            }
+        } catch (_: Exception) {}
         return listOf(
             VolumeInfo(
                 name = h.volumeLabel.ifEmpty { "FAT32 Volume" },
                 type = "FAT32",
                 uuid = "",
                 totalBlocks = h.totalSectors32,
-                blockSize = h.bytesPerSector.toLong()
+                blockSize = h.bytesPerSector.toLong(),
+                freeBlocks = freeSectors,
+                freeKnown = known
             )
         )
     }

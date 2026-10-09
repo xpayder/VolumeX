@@ -25,6 +25,8 @@ data class BreadcrumbItem(val name: String, val path: String)
 
 enum class ViewMode { LIST, GRID }
 
+data class Clipboard(val entries: List<FileSystemEntry>, val move: Boolean)
+
 class FileBrowserViewModel : ViewModel() {
     companion object {
         private const val TAG = "VolumeX"
@@ -57,6 +59,12 @@ class FileBrowserViewModel : ViewModel() {
     val message: StateFlow<String?> = _message.asStateFlow()
     fun consumeMessage() { _message.value = null }
     private fun say(text: String) { Log.w(TAG, "UI message: $text"); _message.value = text }
+
+    private val _clipboard = MutableStateFlow<Clipboard?>(null)
+    val clipboard: StateFlow<Clipboard?> = _clipboard.asStateFlow()
+    fun setClipboard(entries: List<FileSystemEntry>, move: Boolean) { _clipboard.value = Clipboard(entries, move); say(if (move) "Cut ${entries.size} item(s) - open a folder and tap Paste" else "Copied ${entries.size} item(s) - open a folder and tap Paste") }
+    fun clearClipboard() { _clipboard.value = null }
+    private var viewModeChosenByUser = false
 
     private var reader: FileSystemReader? = null
     private var currentVolumeIndex: Int = 0
@@ -129,6 +137,7 @@ class FileBrowserViewModel : ViewModel() {
     }
 
     fun toggleViewMode() {
+        viewModeChosenByUser = true
         _viewMode.value = if (_viewMode.value == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
     }
 
@@ -310,6 +319,105 @@ class FileBrowserViewModel : ViewModel() {
         }
     }
 
+
+    // ── Copy / move inside the drive, folder upload ──────────────────────────
+    private fun uniqueName(existing: Set<String>, name: String): String {
+        if (name !in existing) return name
+        val dot = name.lastIndexOf('.'); val stem = if (dot > 0) name.substring(0, dot) else name; val ext = if (dot > 0) name.substring(dot) else ""
+        var n = 1; var cand: String
+        do { cand = if (n == 1) "$stem copy$ext" else "$stem copy $n$ext"; n++ } while (cand in existing)
+        return cand
+    }
+
+    fun pasteHere() {
+        val clip = _clipboard.value ?: return
+        val r = reader ?: return
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
+        val dest = currentPath
+        viewModelScope.launch(Dispatchers.IO) {
+            val progresses = mutableListOf<TransferProgress>()
+            _transferProgress.value = emptyList()
+            var failed = 0
+            fun copyEntry(e: FileSystemEntry, dstParent: FileSystemEntry, dstPath: String, rename: String?): Boolean {
+                val existing = r.listDirectory(currentVolumeIndex, dstPath).map { it.name }.toSet()
+                val name = uniqueName(existing, rename ?: e.name)
+                if (e.isDirectory) {
+                    // never copy a folder into itself
+                    if (dstPath == e.path || dstPath.startsWith(e.path.trimEnd('/') + "/")) { say("Cannot copy a folder into itself"); return false }
+                    if (!w.createDirectory(dstParent, name)) return false
+                    val newDir = r.listDirectory(currentVolumeIndex, dstPath).firstOrNull { it.name == name && it.isDirectory } ?: return false
+                    var ok = true
+                    for (c in r.listDirectory(currentVolumeIndex, e.path)) ok = copyEntry(c, newDir, newDir.path, null) && ok
+                    return ok
+                }
+                val idx = progresses.size
+                progresses.add(TransferProgress(name, 0, e.size)); _transferProgress.value = progresses.toList()
+                val pin = java.io.PipedInputStream(1 shl 20); val pout = java.io.PipedOutputStream(pin)
+                val producer = Thread { try { r.readFileTo(e, pout) } catch (x: Exception) { Log.e(TAG, "paste read failed", x) } finally { try { pout.close() } catch (_: Exception) {} } }
+                producer.start()
+                val ok = try { w.writeFileStream(dstParent, name, e.size, pin) { n -> updateProgress(progresses, idx, TransferProgress(name, n, e.size)) } } catch (x: Exception) { false }
+                try { pin.close() } catch (_: Exception) {}
+                producer.join()
+                updateProgress(progresses, idx, if (ok) TransferProgress(name, e.size, e.size, isComplete = true) else TransferProgress(name, 0, e.size, isComplete = true, error = "Could not copy (drive full or name rejected)"))
+                return ok
+            }
+            val dstParent = resolveDirEntry(dest)
+            if (dstParent == null) { say("Could not open the destination folder"); return@launch }
+            for (e in clip.entries) {
+                val ok = try { copyEntry(e, dstParent, dest, null) } catch (x: Exception) { Log.e(TAG, "paste failed", x); false }
+                if (!ok) failed++
+                else if (clip.move) { try { w.deleteEntry(e) } catch (x: Exception) { failed++ } }
+            }
+            _clipboard.value = null
+            say(if (failed == 0) (if (clip.move) "Moved ${clip.entries.size} item(s)" else "Copied ${clip.entries.size} item(s)") else "$failed item(s) failed")
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
+    /** Upload a folder picked on the phone (recursive) into the current folder. */
+    fun importTree(context: Context, treeUri: Uri) {
+        val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
+        val r = reader ?: return
+        val dest = currentPath
+        viewModelScope.launch(Dispatchers.IO) {
+            val resolver = context.contentResolver
+            val progresses = mutableListOf<TransferProgress>(); _transferProgress.value = emptyList()
+            var failed = 0
+            fun children(docUri: Uri): List<Triple<Uri, String, Pair<String, Long>>> {
+                val id = DocumentsContract.getDocumentId(docUri)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, id)
+                val out = ArrayList<Triple<Uri, String, Pair<String, Long>>>()
+                resolver.query(childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use { c ->
+                    while (c.moveToNext()) out.add(Triple(DocumentsContract.buildDocumentUriUsingTree(treeUri, c.getString(0)), c.getString(1) ?: "item", (c.getString(2) ?: "") to (if (c.isNull(3)) -1L else c.getLong(3))))
+                }
+                return out
+            }
+            fun upload(doc: Uri, name: String, mime: String, size: Long, dstParent: FileSystemEntry, dstPath: String) {
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (!w.createDirectory(dstParent, name)) { failed++; return }
+                    val nd = r.listDirectory(currentVolumeIndex, dstPath).firstOrNull { it.name == name && it.isDirectory } ?: run { failed++; return }
+                    for ((u, n, ms) in children(doc)) upload(u, n, ms.first, ms.second, nd, nd.path)
+                } else {
+                    val idx = progresses.size
+                    progresses.add(TransferProgress(name, 0, size.coerceAtLeast(0))); _transferProgress.value = progresses.toList()
+                    val ok = try {
+                        val sz = if (size >= 0) size else resolver.openAssetFileDescriptor(doc, "r")?.use { it.length } ?: -1L
+                        resolver.openInputStream(doc)?.use { input -> w.writeFileStream(dstParent, name, sz, input) { n -> updateProgress(progresses, idx, TransferProgress(name, n, sz)) } } ?: false
+                    } catch (x: Exception) { Log.e(TAG, "upload failed: $name", x); false }
+                    updateProgress(progresses, idx, if (ok) TransferProgress(name, size, size, isComplete = true) else TransferProgress(name, 0, size.coerceAtLeast(0), isComplete = true, error = "Could not write"))
+                    if (!ok) failed++
+                }
+            }
+            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launch }
+            val rootDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+            var rootName = "Folder"
+            resolver.query(rootDoc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) rootName = it.getString(0) ?: rootName }
+            upload(rootDoc, rootName, DocumentsContract.Document.MIME_TYPE_DIR, 0, parent, dest)
+            say(if (failed == 0) "Folder uploaded" else "$failed item(s) failed")
+            withContext(Dispatchers.Main) { loadDirectory(currentPath) }
+        }
+    }
+
     // ── Copy from the drive to a folder the user picks (Storage Access Framework) ──
 
     /** Copy files/folders to Downloads/VolumeX (no picker needed). */
@@ -415,6 +523,11 @@ class FileBrowserViewModel : ViewModel() {
             if (result != null) {
                 val filtered = if (_showHidden.value) result else result.filter { !it.name.startsWith(".") }
                 _entries.value = sortEntries(filtered, _sortBy.value)
+                if (!viewModeChosenByUser) {
+                    val files = filtered.filter { !it.isDirectory }
+                    val media = files.count { it.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.IMAGE || it.fileType == com.fatalpuppet.volumex.storage.filesystem.FileType.VIDEO }
+                    _viewMode.value = if (files.isNotEmpty() && media * 2 >= files.size) ViewMode.GRID else ViewMode.LIST
+                }
                 _statusMessage.value = "${filtered.size} item${if (filtered.size != 1) "s" else ""}" +
                     if (_writable.value) "" else " · read-only"
             } else {

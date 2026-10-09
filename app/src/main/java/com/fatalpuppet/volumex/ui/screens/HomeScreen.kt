@@ -27,7 +27,8 @@ import com.fatalpuppet.volumex.ui.viewmodel.MainViewModel
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
-    onBrowseVolume: (VolumeInfo, Int) -> Unit = { _, _ -> }
+    onBrowseVolume: (VolumeInfo, Int) -> Unit = { _, _ -> },
+    onOpenSettings: () -> Unit = {}
 ) {
     val deviceState by viewModel.deviceState.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
@@ -35,15 +36,14 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(DeepNavy, DarkNavy, NavyMid)
-                )
-            )
+            .background(DeepNavy)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Top bar
-            HomeTopBar(statusMessage = statusMessage)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("VolumeX", color = TextTertiary, fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TextSecondary) }
+            }
 
             // Content
             AnimatedContent(
@@ -55,12 +55,7 @@ fun HomeScreen(
             ) { state ->
                 when (state) {
                     is DeviceState.Disconnected -> {
-                        EmptyStateView(
-                            icon = Icons.Default.UsbOff,
-                            title = "No Device Connected",
-                            subtitle = "Connect an APFS or HFS+ drive via USB OTG cable to get started",
-                            actionLabel = "Scan for Devices"
-                        )
+                        EmptyBay(note = if (statusMessage == "Safe to unplug") "Safe to unplug" else null)
                     }
                     is DeviceState.Connecting -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -74,8 +69,10 @@ fun HomeScreen(
                     is DeviceState.Connected -> {
                         ConnectedView(
                             deviceName = state.deviceName,
-                            volumes = state.volumes,
-                            onBrowseVolume = onBrowseVolume
+                            state = state,
+                            onBrowseVolume = onBrowseVolume,
+                            onEject = { viewModel.eject() },
+                            onOpenSettings = onOpenSettings
                         )
                     }
                     is DeviceState.NeedsPassphrase -> {
@@ -151,65 +148,88 @@ private fun HomeTopBar(statusMessage: String) {
 @Composable
 private fun ConnectedView(
     deviceName: String,
-    volumes: List<VolumeInfo>,
-    onBrowseVolume: (VolumeInfo, Int) -> Unit
+    state: DeviceState.Connected,
+    onBrowseVolume: (VolumeInfo, Int) -> Unit,
+    onEject: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp)
-    ) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
-            // Device connected header
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(AccentGreen)
-                    )
+                    Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(AccentGreen))
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "Connected",
-                        color = AccentGreen,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("CONNECTED", color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Medium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
+                Text(deviceName, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                Text("${state.volumes.size} volume${if (state.volumes.size != 1) "s" else ""}", color = TextTertiary, fontSize = 13.sp)
+            }
+        }
+        items(state.volumes.size) { idx ->
+            val vol = state.volumes[idx]
+            val writable = (state.reader as? com.fatalpuppet.volumex.storage.filesystem.CompositeReader)?.writerFor(idx) != null || (state.reader !is com.fatalpuppet.volumex.storage.filesystem.CompositeReader && state.writer != null)
+            DriveCard(
+                volume = vol, writable = writable, onOpen = { onBrowseVolume(vol, idx) }, onEject = onEject,
+                onEnableWrite = if (!writable && vol.type.equals("APFS", true)) onOpenSettings else null
+            )
+        }
+        if (state.volumes.isEmpty()) {
+            item { EmptyStateView(icon = Icons.Default.FolderOff, title = "No Volumes Found", subtitle = "The drive was recognised but no readable volume was found on it.") }
+        }
+        item {
+            Text(
+                "Eject before unplugging so pending writes are saved.", color = TextTertiary, fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+    }
+}
+
+private val FormatChips = listOf("APFS", "HFS+", "EXFAT", "FAT32", "FILEVAULT")
+
+@Composable
+private fun EmptyBay(note: String? = null) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 28.dp).padding(bottom = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+    ) {
+        if (note != null) {
+            Text(
+                "\u2713 ${note.uppercase()}", color = AccentGreen, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.padding(bottom = 18.dp).clip(RoundedCornerShape(8.dp)).background(AccentGreen.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+        Text("No drive connected", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Plug a USB drive into your phone to read and write it. It mounts automatically.",
+            color = TextTertiary, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 20.sp
+        )
+        Spacer(Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FormatChips.forEach { c ->
                 Text(
-                    text = deviceName,
-                    color = TextPrimary,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
+                    c, color = TextSecondary, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(DarkSurface).padding(horizontal = 8.dp, vertical = 5.dp)
                 )
             }
         }
-
-        item {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "${volumes.size} VOLUME${if (volumes.size != 1) "S" else ""}",
-                color = TextTertiary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-        }
-
-        items(volumes.size) { idx ->
-            DeviceVolumeCard(
-                volumeInfo = volumes[idx],
-                onClick = { onBrowseVolume(volumes[idx], idx) }
-            )
-        }
-
-        if (volumes.isEmpty()) {
-            item {
-                EmptyStateView(
-                    icon = Icons.Default.FolderOff,
-                    title = "No Volumes Found",
-                    subtitle = "The connected drive has no APFS or HFS+ volumes"
+        Spacer(Modifier.height(32.dp))
+        val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(14f, 12f), 0f)
+        Box(Modifier.size(128.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                drawRoundRect(color = GlassBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(36f * density / 3f * 2.2f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f * density / 2f, pathEffect = dash))
+                val w = size.width * 0.34f; val h = size.height * 0.11f
+                drawRoundRect(
+                    color = AccentBlue, topLeft = androidx.compose.ui.geometry.Offset((size.width - w) / 2, (size.height - h) / 2), size = androidx.compose.ui.geometry.Size(w, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f * density / 2f)
+                )
+                val iw = w * 0.5f; val ih = h * 0.28f
+                drawRoundRect(
+                    color = AccentBlue, topLeft = androidx.compose.ui.geometry.Offset((size.width - iw) / 2, (size.height - ih) / 2), size = androidx.compose.ui.geometry.Size(iw, ih),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(ih / 2)
                 )
             }
         }

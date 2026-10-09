@@ -3,7 +3,7 @@ package com.fatalpuppet.volumex.ui.screens
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,33 +16,39 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.fatalpuppet.volumex.provider.DriveFileProvider
+import com.fatalpuppet.volumex.storage.ActiveDriveSession
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
 import com.fatalpuppet.volumex.storage.filesystem.FileType
 import com.fatalpuppet.volumex.ui.components.*
 import com.fatalpuppet.volumex.ui.theme.*
-import com.fatalpuppet.volumex.ui.viewmodel.BreadcrumbItem
 import com.fatalpuppet.volumex.ui.viewmodel.FileBrowserViewModel
 import com.fatalpuppet.volumex.ui.viewmodel.SortBy
 import com.fatalpuppet.volumex.ui.viewmodel.ViewMode
+import java.text.DateFormat
+import java.util.Date
+
+private val Mono = FontFamily.Monospace
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,9 +61,8 @@ fun FileBrowserScreen(
     val context = LocalContext.current
     val entries by viewModel.entries.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
     val breadcrumbs by viewModel.breadcrumbs.collectAsState()
-    val selectedEntries by viewModel.selectedEntries.collectAsState()
+    val selected by viewModel.selectedEntries.collectAsState()
     val sortBy by viewModel.sortBy.collectAsState()
     val transferProgress by viewModel.transferProgress.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
@@ -65,608 +70,343 @@ fun FileBrowserScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
-
     val writable by viewModel.writable.collectAsState()
     val message by viewModel.message.collectAsState()
+    val clipboard by viewModel.clipboard.collectAsState()
 
-    var showSortMenu by remember { mutableStateOf(false) }
     var searchActive by remember { mutableStateOf(false) }
-    var showFabMenu by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var sheetEntry by remember { mutableStateOf<FileSystemEntry?>(null) }
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<FileSystemEntry?>(null) }
     var deleteTargets by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
+    var propertiesOf by remember { mutableStateOf<FileSystemEntry?>(null) }
     var pendingCopy by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
     var askDest by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
-    LaunchedEffect(message) {
-        message?.let { snackbarHost.showSnackbar(it); viewModel.consumeMessage() }
-    }
+    val driveName = remember { ActiveDriveSession.volumes.getOrNull(ActiveDriveSession.currentVolumeIndex)?.name?.takeIf { it.isNotBlank() } ?: "Drive" }
+    val title = if (breadcrumbs.size > 1) breadcrumbs.last().name else driveName
+    val visible = entries.filter { showHidden || !it.name.startsWith(".") }
 
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) viewModel.importUris(context, uris)
-    }
-    // "Copy to phone": the user chooses the destination folder (Storage Access Framework).
-    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+    LaunchedEffect(message) { message?.let { snackbarHost.showSnackbar(it); viewModel.consumeMessage() } }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) viewModel.importUris(context, uris) }
+    val uploadTreeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) viewModel.importTree(context, uri) }
+    val saveTreeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null && pendingCopy.isNotEmpty()) viewModel.copyToTree(context, uri, pendingCopy)
         pendingCopy = emptyList()
     }
     fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; askDest = true } }
 
-    // Context menu state
-    var contextMenuEntry by remember { mutableStateOf<FileSystemEntry?>(null) }
+    fun open(entry: FileSystemEntry) { if (entry.isDirectory) viewModel.openEntry(entry) else onOpenPreview?.invoke(entry) }
+    fun back() {
+        when {
+            selected.isNotEmpty() -> viewModel.clearSelection()
+            searchActive -> { searchActive = false; viewModel.search("") }
+            breadcrumbs.size > 1 -> viewModel.navigateUp()
+            else -> onNavigateBack()
+        }
+    }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(DeepNavy, DarkNavy, NavyMid)))
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar with breadcrumbs
-            FileBrowserTopBar(
-                breadcrumbs = breadcrumbs,
-                selectedCount = selectedEntries.size,
-                statusMessage = statusMessage,
-                viewMode = viewMode,
-                showHidden = showHidden,
-                onNavigateBack = {
-                    if (searchActive) {
-                        searchActive = false
-                        viewModel.search("")
-                    } else if (breadcrumbs.size > 1) {
-                        viewModel.navigateUp()
-                    } else {
-                        onNavigateBack()
-                    }
-                },
-                onCopySelected = { askDestination(viewModel.entriesByPaths(selectedEntries)) },
-                writable = writable,
-                onDeleteSelected = { deleteTargets = viewModel.entriesByPaths(selectedEntries) },
-                onClearSelection = { viewModel.clearSelection() },
-                onShowSortMenu = { showSortMenu = true },
-                onToggleViewMode = { viewModel.toggleViewMode() },
-                onToggleHidden = { viewModel.toggleHidden() },
-                onSearchClick = { searchActive = !searchActive; if (!searchActive) viewModel.search("") },
-                onSettingsClick = onOpenSettings,
-                sortBy = sortBy
-            )
-
-            // Search bar
-            AnimatedVisibility(visible = searchActive) {
-                SearchBar(
-                    query = searchQuery,
-                    onQueryChange = { viewModel.search(it) },
-                    onClose = { searchActive = false; viewModel.search("") }
-                )
-            }
-
-            // Sort menu
-            DropdownMenu(
-                expanded = showSortMenu,
-                onDismissRequest = { showSortMenu = false },
-                modifier = Modifier.background(DarkCard)
+    Box(Modifier.fillMaxSize().background(DeepNavy)) {
+        Column(Modifier.fillMaxSize()) {
+            // ── header card ──────────────────────────────────────────────────
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(DarkSurface).border(1.dp, GlassBorderFaint, RoundedCornerShape(20.dp))
             ) {
-                SortBy.values().forEach { sort ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                sort.name.lowercase().replaceFirstChar { it.uppercase() },
-                                color = if (sortBy == sort) AccentBlue else TextPrimary
-                            )
-                        },
-                        onClick = { viewModel.setSortBy(sort); showSortMenu = false },
-                        leadingIcon = {
-                            if (sortBy == sort) Icon(Icons.Default.Check, null, tint = AccentBlue)
-                        }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
+                    Text(
+                        if (selected.isNotEmpty()) "${selected.size} selected" else title,
+                        color = if (selected.isNotEmpty()) AccentBlue else TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                     )
+                    if (selected.isNotEmpty()) {
+                        IconButton(onClick = { askDestination(viewModel.entriesByPaths(selected)) }) { Icon(Icons.Default.Download, "Save to phone", tint = TextSecondary) }
+                        if (writable) {
+                            IconButton(onClick = { viewModel.setClipboard(viewModel.entriesByPaths(selected), false); viewModel.clearSelection() }) { Icon(Icons.Default.ContentCopy, "Copy", tint = TextSecondary) }
+                            IconButton(onClick = { deleteTargets = viewModel.entriesByPaths(selected) }) { Icon(Icons.Default.Delete, "Delete", tint = AccentRed) }
+                        }
+                    } else {
+                        IconButton(onClick = { viewModel.toggleViewMode() }) {
+                            Icon(if (viewMode == ViewMode.GRID) Icons.Default.ViewList else Icons.Default.GridView, "View", tint = TextSecondary)
+                        }
+                        IconButton(onClick = { searchActive = !searchActive; if (!searchActive) viewModel.search("") }) { Icon(Icons.Default.Search, "Search", tint = TextSecondary) }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More", tint = TextSecondary) }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, modifier = Modifier.background(DarkCard)) {
+                                SortBy.values().forEach { sort ->
+                                    DropdownMenuItem(
+                                        text = { Text("Sort by ${sort.name.lowercase()}", color = if (sortBy == sort) AccentBlue else TextPrimary) },
+                                        leadingIcon = { if (sortBy == sort) Icon(Icons.Default.Check, null, tint = AccentBlue) else Spacer(Modifier.size(24.dp)) },
+                                        onClick = { viewModel.setSortBy(sort); menuOpen = false }
+                                    )
+                                }
+                                HorizontalDivider(color = GlassBorderFaint)
+                                DropdownMenuItem(
+                                    text = { Text(if (showHidden) "Hide hidden files" else "Show hidden files", color = TextPrimary) },
+                                    leadingIcon = { Icon(if (showHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility, null, tint = TextSecondary) },
+                                    onClick = { viewModel.toggleHidden(); menuOpen = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Settings", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Settings, null, tint = TextSecondary) },
+                                    onClick = { menuOpen = false; onOpenSettings() }
+                                )
+                            }
+                        }
+                    }
+                }
+                // breadcrumb path + count
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        items(breadcrumbs.size) { i ->
+                            val c = breadcrumbs[i]; val last = i == breadcrumbs.lastIndex
+                            Text(
+                                if (i == 0) driveName else c.name, color = if (last) TextSecondary else AccentBlue, fontSize = 12.sp, fontFamily = Mono,
+                                maxLines = 1, modifier = Modifier.clickable(enabled = !last) { viewModel.navigateTo(c.path) }
+                            )
+                            if (!last) Text("›", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 2.dp))
+                        }
+                    }
+                    Text("${visible.size} item${if (visible.size != 1) "s" else ""}${if (!writable) " · read-only" else ""}", color = TextTertiary, fontSize = 11.sp, fontFamily = Mono)
                 }
             }
 
-            // Transfer progress
+            AnimatedVisibility(visible = searchActive) {
+                BrowserSearchField(searchQuery, { viewModel.search(it) }, { searchActive = false; viewModel.search("") })
+            }
+
             if (transferProgress.isNotEmpty()) {
-                transferProgress.forEach { prog ->
-                    TransferProgressCard(progress = prog, onCancel = { viewModel.clearTransferProgress() })
-                }
-                Spacer(Modifier.height(4.dp))
+                transferProgress.takeLast(3).forEach { TransferProgressCard(progress = it, onCancel = { viewModel.clearTransferProgress() }) }
             }
 
-            // Display: search results or directory listing
-            val displayEntries = if (searchActive && searchQuery.isNotBlank()) searchResults else entries
-            val isDisplayLoading = isLoading || (searchActive && isSearching)
-
+            val display = if (searchActive && searchQuery.isNotBlank()) searchResults else visible
             when {
-                isDisplayLoading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = AccentBlue)
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                if (searchActive) "Searching…" else "Loading…",
-                                color = TextSecondary,
-                                fontSize = 14.sp
-                            )
-                        }
+                isLoading || (searchActive && isSearching) -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }
+                display.isEmpty() -> EmptyFolderView(path = if (searchActive) "No results for \"$searchQuery\"" else (breadcrumbs.lastOrNull()?.path ?: "/"))
+                viewMode == ViewMode.GRID -> LazyVerticalGrid(
+                    columns = GridCells.Adaptive(104.dp), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 120.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()
+                ) {
+                    items(display, key = { it.path }) { e ->
+                        GridCell(e, selected.contains(e.path), { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, { viewModel.toggleSelection(e) }, { sheetEntry = e })
                     }
                 }
-                displayEntries.isEmpty() -> {
-                    EmptyFolderView(path = if (searchActive) "No results for \"$searchQuery\"" else (breadcrumbs.lastOrNull()?.path ?: "/"))
-                }
-                viewMode == ViewMode.GRID -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(120.dp),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(displayEntries, key = { it.path }) { entry ->
-                            GridFileItem(
-                                entry = entry,
-                                isSelected = selectedEntries.contains(entry.path),
-                                onClick = {
-                                    if (selectedEntries.isNotEmpty()) {
-                                        viewModel.toggleSelection(entry)
-                                    } else {
-                                        if (entry.isDirectory) viewModel.openEntry(entry)
-                                        else onOpenPreview?.invoke(entry)
-                                    }
-                                },
-                                onLongClick = { contextMenuEntry = entry }
-                            )
-                        }
-                    }
-                }
-                else -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        items(displayEntries, key = { it.path }) { entry ->
-                            FileListItem(
-                                entry = entry,
-                                isSelected = selectedEntries.contains(entry.path),
-                                onClick = {
-                                    if (selectedEntries.isNotEmpty()) {
-                                        viewModel.toggleSelection(entry)
-                                    } else {
-                                        if (entry.isDirectory) {
-                                            viewModel.openEntry(entry)
-                                        } else {
-                                            onOpenPreview?.invoke(entry)
-                                        }
-                                    }
-                                },
-                                onLongClick = { contextMenuEntry = entry }
-                            )
-                        }
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    items(display, key = { it.path }) { e ->
+                        FileListItem(entry = e, isSelected = selected.contains(e.path), onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
                     }
                 }
             }
         }
 
-        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
+        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp, start = 16.dp, end = 16.dp))
 
-        if (writable && selectedEntries.isEmpty()) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(20.dp)) {
-                FloatingActionButton(onClick = { showFabMenu = true }, containerColor = AccentBlue, contentColor = TextPrimary) {
-                    Icon(Icons.Default.Add, "Add")
-                }
-                DropdownMenu(expanded = showFabMenu, onDismissRequest = { showFabMenu = false }, modifier = Modifier.background(DarkCard)) {
-                    DropdownMenuItem(
-                        text = { Text("Add files from phone", color = TextPrimary) },
-                        leadingIcon = { Icon(Icons.Default.UploadFile, null, tint = AccentBlue) },
-                        onClick = { showFabMenu = false; importLauncher.launch(arrayOf("*/*")) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("New folder", color = TextPrimary) },
-                        leadingIcon = { Icon(Icons.Default.CreateNewFolder, null, tint = AccentBlue) },
-                        onClick = { showFabMenu = false; showNewFolder = true }
-                    )
+        // ── floating action pill ─────────────────────────────────────────────
+        if (writable && selected.isEmpty() && !searchActive) {
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).shadow(12.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                    .background(DarkCard).border(1.dp, GlassBorder, RoundedCornerShape(28.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (clipboard != null) {
+                    PillAction(Icons.Default.ContentPaste, "Paste (${clipboard!!.entries.size})") { viewModel.pasteHere() }
+                    PillAction(Icons.Default.Close, "Cancel") { viewModel.clearClipboard() }
+                } else {
+                    PillAction(Icons.Default.CreateNewFolder, "New folder") { showNewFolder = true }
+                    PillAction(Icons.Default.UploadFile, "Upload files") { importLauncher.launch(arrayOf("*/*")) }
+                    PillAction(Icons.Default.DriveFolderUpload, "Upload folder") { uploadTreeLauncher.launch(null) }
                 }
             }
         }
 
+        // ── dialogs ──────────────────────────────────────────────────────────
         if (askDest) {
             AlertDialog(
                 onDismissRequest = { askDest = false; pendingCopy = emptyList() },
-                title = { Text("Copy to phone", color = TextPrimary) },
+                title = { Text("Save to phone", color = TextPrimary) },
                 text = {
                     Column {
-                        ContextMenuItem(Icons.Default.Download, "Downloads / VolumeX") {
-                            askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList()
-                        }
-                        ContextMenuItem(Icons.Default.FolderOpen, "Choose another folder…") {
-                            askDest = false; treeLauncher.launch(null)
-                        }
-                        Text("Android does not allow choosing Downloads or the storage root in the folder picker, so use the first option for those.",
-                            color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                        SheetRow(Icons.Default.Download, "Downloads / VolumeX") { askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList() }
+                        SheetRow(Icons.Default.FolderOpen, "Choose another folder…") { askDest = false; saveTreeLauncher.launch(null) }
+                        Text("Android's folder picker cannot pick Downloads or the storage root, so use the first option for those.", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 },
-                confirmButton = {},
-                dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } },
-                containerColor = DarkCard
+                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
             )
         }
-
-        if (showNewFolder) {
-            TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
-        }
-        renameTarget?.let { t ->
-            TextInputDialog("Rename", t.name, "Rename", { renameTarget = null }) { viewModel.renameEntry(t, it); renameTarget = null }
-        }
+        if (showNewFolder) TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
+        renameTarget?.let { t -> TextInputDialog("Rename", t.name, "Rename", { renameTarget = null }) { viewModel.renameEntry(t, it); renameTarget = null } }
         if (deleteTargets.isNotEmpty()) {
             AlertDialog(
                 onDismissRequest = { deleteTargets = emptyList() },
                 title = { Text("Delete ${deleteTargets.size} item${if (deleteTargets.size != 1) "s" else ""}?", color = TextPrimary) },
                 text = { Text("This permanently removes ${if (deleteTargets.size == 1) "\"${deleteTargets[0].name}\"" else "the selected items"} from the drive. It cannot be undone.", color = TextSecondary) },
                 confirmButton = { TextButton(onClick = { viewModel.deleteEntries(deleteTargets); deleteTargets = emptyList() }) { Text("Delete", color = AccentRed) } },
-                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } },
-                containerColor = DarkCard
+                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
             )
         }
+        propertiesOf?.let { e -> PropertiesDialog(e, driveName) { propertiesOf = null } }
 
-        // Context menu
-        contextMenuEntry?.let { entry ->
-            EntryContextMenu(
-                entry = entry,
-                onDismiss = { contextMenuEntry = null },
-                onOpenWith = {
-                    contextMenuEntry = null
-                    val uri = DriveFileProvider.buildUri(entry.inodeOid, entry.path)
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, getMimeType(entry))
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // ── bottom sheet with the file actions ───────────────────────────────
+        sheetEntry?.let { e ->
+            ModalBottomSheet(onDismissRequest = { sheetEntry = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = DarkSurface, contentColor = TextPrimary) {
+                Column(Modifier.padding(bottom = 24.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(DarkCard), contentAlignment = Alignment.Center) {
+                            Icon(if (e.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = AccentBlue)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(e.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(if (e.isDirectory) "Folder" else e.formattedSize, color = TextTertiary, fontSize = 12.sp, fontFamily = Mono)
+                        }
                     }
-                    try { context.startActivity(Intent.createChooser(intent, "Open with")) }
-                    catch (e: Exception) { /* no app to handle */ }
-                },
-                onShare = {
-                    contextMenuEntry = null
-                    val uri = DriveFileProvider.buildUri(entry.inodeOid, entry.path)
-                    val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = getMimeType(entry)
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    HorizontalDivider(color = GlassBorderFaint, modifier = Modifier.padding(vertical = 4.dp))
+                    SheetRow(Icons.Default.OpenInNew, if (e.isDirectory) "Open" else "Open") { sheetEntry = null; open(e) }
+                    if (!e.isDirectory) {
+                        SheetRow(Icons.Default.Apps, "Open with…") {
+                            sheetEntry = null
+                            val intent = Intent(Intent.ACTION_VIEW).apply { setDataAndType(DriveFileProvider.buildUri(e.inodeOid, e.path), mimeOf(e)); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                            try { context.startActivity(Intent.createChooser(intent, "Open with")) } catch (_: Exception) {}
+                        }
+                        SheetRow(Icons.Default.Share, "Share") {
+                            sheetEntry = null
+                            val intent = Intent(Intent.ACTION_SEND).apply { type = mimeOf(e); putExtra(Intent.EXTRA_STREAM, DriveFileProvider.buildUri(e.inodeOid, e.path)); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                            context.startActivity(Intent.createChooser(intent, "Share"))
+                        }
                     }
-                    context.startActivity(Intent.createChooser(intent, "Share"))
-                },
-                onCopyToPhone = {
-                    contextMenuEntry = null
-                    askDestination(listOf(entry))
-                },
-                onCopyToDownloads = null,
-                onRename = if (writable) ({ contextMenuEntry = null; renameTarget = entry }) else null,
-                onDelete = if (writable) ({ contextMenuEntry = null; deleteTargets = listOf(entry) }) else null,
-                onFolderDetails = if (entry.isDirectory) ({
-                    contextMenuEntry = null
-                    viewModel.getFolderDetails(entry)
-                }) else null
-            )
+                    SheetRow(Icons.Default.Download, "Save to…") { sheetEntry = null; askDestination(listOf(e)) }
+                    SheetRow(Icons.Default.Info, "Properties") { sheetEntry = null; propertiesOf = e }
+                    if (writable) {
+                        HorizontalDivider(color = GlassBorderFaint, modifier = Modifier.padding(vertical = 4.dp))
+                        SheetRow(Icons.Default.ContentCopy, "Copy") { sheetEntry = null; viewModel.setClipboard(listOf(e), false) }
+                        SheetRow(Icons.Default.ContentCut, "Move") { sheetEntry = null; viewModel.setClipboard(listOf(e), true) }
+                        SheetRow(Icons.Default.Edit, "Rename") { sheetEntry = null; renameTarget = e }
+                        SheetRow(Icons.Default.Delete, "Delete", AccentRed) { sheetEntry = null; deleteTargets = listOf(e) }
+                    }
+                }
+            }
         }
     }
 }
 
-// ── Search Bar ────────────────────────────────────────────────────────────────
+// ── pieces ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onClose: () -> Unit
-) {
+private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+        Text(label, color = TextPrimary, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color = TextPrimary, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = if (tint == TextPrimary) TextSecondary else tint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(18.dp))
+        Text(label, color = tint, fontSize = 15.sp)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onMenu: () -> Unit) {
+    val context = LocalContext.current
+    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(DarkCard)
+                .border(if (isSelected) 2.dp else 1.dp, if (isSelected) AccentBlue else GlassBorderFaint, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (entry.fileType == FileType.IMAGE) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(DriveFileProvider.buildUri(entry.inodeOid, entry.path)).size(360).crossfade(true).build(),
+                    contentDescription = entry.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    when (entry.fileType) {
+                        FileType.DIRECTORY -> Icons.Default.Folder; FileType.VIDEO -> Icons.Default.PlayCircle; FileType.AUDIO -> Icons.Default.AudioFile
+                        FileType.DOCUMENT -> Icons.Default.Description; FileType.ARCHIVE -> Icons.Default.FolderZip; FileType.CODE -> Icons.Default.Code
+                        else -> Icons.Default.InsertDriveFile
+                    },
+                    null, modifier = Modifier.size(40.dp),
+                    tint = when (entry.fileType) { FileType.DIRECTORY -> AccentBlue; FileType.VIDEO -> AccentOrange; FileType.AUDIO -> AccentGreen; else -> TextTertiary }
+                )
+            }
+            if (isSelected) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape).background(AccentBlue), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Check, null, tint = DeepNavy, modifier = Modifier.size(16.dp))
+            }
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp).clip(CircleShape).background(DeepNavy.copy(alpha = 0.6f)).clickable(onClick = onMenu),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.MoreVert, "Actions", tint = TextPrimary, modifier = Modifier.size(16.dp)) }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(entry.name, color = TextPrimary, fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(if (entry.isDirectory) "Folder" else entry.formattedSize, color = TextTertiary, fontSize = 9.sp, lineHeight = 12.sp, fontFamily = Mono)
+    }
+}
+
+@Composable
+private fun BrowserSearchField(query: String, onChange: (String) -> Unit, onClose: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(GlassWhite8)
-            .border(1.dp, GlassBorderFaint, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(DarkSurface)
+            .border(1.dp, GlassBorderFaint, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(Icons.Default.Search, null, tint = TextTertiary, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         androidx.compose.foundation.text.BasicTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f),
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 14.sp),
-            decorationBox = { inner ->
-                Box {
-                    if (query.isEmpty()) Text("Search files…", color = TextTertiary, fontSize = 14.sp)
-                    inner()
-                }
-            }
+            value = query, onValueChange = onChange, modifier = Modifier.weight(1f), singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 15.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentBlue),
+            decorationBox = { inner -> Box { if (query.isEmpty()) Text("Search this drive", color = TextTertiary, fontSize = 15.sp); inner() } }
         )
-        if (query.isNotEmpty()) {
-            IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Close, null, tint = TextTertiary, modifier = Modifier.size(16.dp))
-            }
-        }
-        IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.KeyboardArrowUp, null, tint = TextTertiary, modifier = Modifier.size(16.dp))
-        }
+        IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "Close search", tint = TextTertiary, modifier = Modifier.size(16.dp)) }
     }
 }
 
-// ── Grid Item ─────────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GridFileItem(
-    entry: FileSystemEntry,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val context = LocalContext.current
-    val bgColor = if (isSelected) GlassWhite16 else GlassWhite8
-    val borderColor = if (isSelected) AccentBlue else GlassBorderFaint
-
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Thumbnail or icon
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(GlassWhite8),
-            contentAlignment = Alignment.Center
-        ) {
-            if (entry.fileType == FileType.IMAGE) {
-                val uri = DriveFileProvider.buildUri(entry.inodeOid, entry.path)
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(uri)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = entry.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Icon(
-                    imageVector = when (entry.fileType) {
-                        FileType.DIRECTORY -> Icons.Default.Folder
-                        FileType.VIDEO -> Icons.Default.VideoFile
-                        FileType.AUDIO -> Icons.Default.AudioFile
-                        FileType.DOCUMENT -> Icons.Default.Description
-                        FileType.ARCHIVE -> Icons.Default.FolderZip
-                        FileType.CODE -> Icons.Default.Code
-                        else -> Icons.Default.InsertDriveFile
-                    },
-                    contentDescription = null,
-                    tint = when (entry.fileType) {
-                        FileType.DIRECTORY -> AccentBlue
-                        FileType.VIDEO -> AccentOrange
-                        FileType.AUDIO -> AccentGreen
-                        else -> TextTertiary
-                    },
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = entry.name,
-            color = TextPrimary,
-            fontSize = 11.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-// ── Context Menu ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun EntryContextMenu(
-    entry: FileSystemEntry,
-    onDismiss: () -> Unit,
-    onOpenWith: () -> Unit,
-    onShare: () -> Unit,
-    onCopyToPhone: () -> Unit,
-    onCopyToDownloads: (() -> Unit)?,
-    onRename: (() -> Unit)?,
-    onDelete: (() -> Unit)?,
-    onFolderDetails: (() -> Unit)?
-) {
+private fun PropertiesDialog(e: FileSystemEntry, drive: String, onDismiss: () -> Unit) {
+    fun date(ms: Long) = if (ms <= 0) "—" else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ms))
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(entry.name, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        },
+        title = { Text("Properties", color = TextPrimary) },
         text = {
-            Column {
-                if (!entry.isDirectory) {
-                    ContextMenuItem(Icons.Default.OpenInNew, "Open with", onOpenWith)
-                    ContextMenuItem(Icons.Default.Share, "Share", onShare)
-                }
-                ContextMenuItem(Icons.Default.Download, "Copy to phone…", onCopyToPhone)
-                if (onCopyToDownloads != null) ContextMenuItem(Icons.Default.FileDownload, "Copy to Downloads", onCopyToDownloads)
-                if (onRename != null) ContextMenuItem(Icons.Default.Edit, "Rename", onRename)
-                if (onDelete != null) ContextMenuItem(Icons.Default.Delete, "Delete", onDelete)
-                if (onFolderDetails != null) {
-                    ContextMenuItem(Icons.Default.Info, "Folder details", onFolderDetails)
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PropRow("Name", e.name); PropRow("Where", "$drive${e.path.substringBeforeLast('/', "")}/")
+                PropRow("Kind", if (e.isDirectory) "Folder" else (e.extension.uppercase().ifEmpty { "File" }))
+                if (!e.isDirectory) PropRow("Size", "${e.formattedSize}  (${e.size} bytes)")
+                PropRow("Modified", date(e.modifiedAt)); PropRow("Created", date(e.createdAt))
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) }
-        },
-        containerColor = DarkCard,
-        titleContentColor = TextPrimary
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } }, containerColor = DarkCard
     )
 }
 
 @Composable
-private fun ContextMenuItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(label, color = TextPrimary, fontSize = 14.sp)
-    }
-}
-
-// ── Top Bar ───────────────────────────────────────────────────────────────────
-
-@Composable
-private fun FileBrowserTopBar(
-    breadcrumbs: List<BreadcrumbItem>,
-    selectedCount: Int,
-    statusMessage: String,
-    viewMode: ViewMode,
-    showHidden: Boolean,
-    onNavigateBack: () -> Unit,
-    onCopySelected: () -> Unit,
-    writable: Boolean,
-    onDeleteSelected: () -> Unit,
-    onClearSelection: () -> Unit,
-    onShowSortMenu: () -> Unit,
-    onToggleViewMode: () -> Unit,
-    onToggleHidden: () -> Unit,
-    onSearchClick: () -> Unit,
-    onSettingsClick: () -> Unit = {},
-    sortBy: SortBy
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassBackground(shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp), borderWidth = 0.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            IconButton(onClick = onNavigateBack, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = if (selectedCount > 0) "$selectedCount selected" else statusMessage,
-                color = if (selectedCount > 0) AccentBlue else TextSecondary,
-                fontSize = 13.sp,
-                modifier = Modifier.weight(1f)
-            )
-
-            if (selectedCount > 0) {
-                IconButton(onClick = onCopySelected) {
-                    Icon(Icons.Default.Download, "Copy to phone", tint = AccentBlue)
-                }
-                if (writable) IconButton(onClick = onDeleteSelected) {
-                    Icon(Icons.Default.Delete, "Delete", tint = AccentRed)
-                }
-                IconButton(onClick = onClearSelection) {
-                    Icon(Icons.Default.Close, "Clear", tint = TextSecondary)
-                }
-            } else {
-                IconButton(onClick = onSearchClick) {
-                    Icon(Icons.Default.Search, "Search", tint = TextSecondary)
-                }
-                IconButton(onClick = onToggleHidden) {
-                    Icon(
-                        if (showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        "Toggle hidden",
-                        tint = if (showHidden) AccentBlue else TextSecondary
-                    )
-                }
-                IconButton(onClick = onToggleViewMode) {
-                    Icon(
-                        if (viewMode == ViewMode.GRID) Icons.Default.ViewList else Icons.Default.GridView,
-                        "Toggle view mode",
-                        tint = TextSecondary
-                    )
-                }
-                IconButton(onClick = onShowSortMenu) {
-                    Icon(Icons.Default.Sort, "Sort", tint = TextSecondary)
-                }
-                IconButton(onClick = onSettingsClick) {
-                    Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
-                }
-            }
-        }
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(bottom = 8.dp)
-        ) {
-            items(breadcrumbs) { crumb ->
-                val isLast = crumb == breadcrumbs.last()
-                BreadcrumbChip(crumb, isLast = isLast)
-                if (!isLast) {
-                    Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BreadcrumbChip(crumb: BreadcrumbItem, isLast: Boolean) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (isLast) AccentBlue.copy(alpha = 0.2f) else GlassWhite8)
-            .border(1.dp, if (isLast) AccentBlue.copy(alpha = 0.5f) else GlassBorderFaint, RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = crumb.name,
-            color = if (isLast) AccentBlue else TextTertiary,
-            fontSize = 12.sp,
-            fontWeight = if (isLast) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-private fun getMimeType(entry: FileSystemEntry): String {
-    val ext = entry.extension
-    return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+private fun PropRow(k: String, v: String) {
+    Column { Text(k.uppercase(), color = TextTertiary, fontSize = 10.sp, fontFamily = Mono); Text(v, color = TextPrimary, fontSize = 14.sp) }
 }
 
 @Composable
 private fun TextInputDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, color = TextPrimary) },
-        text = {
-            OutlinedTextField(
-                value = text, onValueChange = { text = it }, singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
-            )
-        },
+        onDismissRequest = onDismiss, title = { Text(title, color = TextPrimary) },
+        text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)) },
         confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = AccentBlue) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } },
-        containerColor = DarkCard
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard
     )
 }
+
+private fun mimeOf(e: FileSystemEntry): String = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(e.extension) ?: "*/*"

@@ -120,7 +120,11 @@ class ApfsReader(
 
     override fun getVolumeInfos(): List<VolumeInfo> {
         val sb = containerSb ?: return emptyList()
-        return sb.fsOids.filter { it != 0L }.indices.mapNotNull { volume(it)?.info }
+        val vols = sb.fsOids.filter { it != 0L }.indices.mapNotNull { volume(it) }
+        // container free space = all blocks minus what every volume has allocated (approximation: ignores a few metadata blocks)
+        val usedAll = vols.sumOf { it.sb.allocCount }
+        val free = (sb.blockCount - usedAll).coerceAtLeast(0)
+        return vols.map { it.info.copy(freeBlocks = free, freeKnown = true) }
     }
 
     private fun resolvePathOid(vol: Volume, path: String): Long? {

@@ -5,22 +5,22 @@ import androidx.compose.ui.graphics.Color
 // ── Liquid Glass Palette ──────────────────────────────────────────────────────
 
 // Base / Background
-val DeepNavy          = Color(0xFF0A0E1A)
-val DarkNavy          = Color(0xFF0D1220)
-val NavyMid           = Color(0xFF111827)
-val DarkSurface       = Color(0xFF1A1F2E)
-val DarkCard          = Color(0xFF1E2435)
+val DeepNavy          = Color(0xFF0A0C0F)
+val DarkNavy          = Color(0xFF0D1014)
+val NavyMid           = Color(0xFF11151A)
+val DarkSurface       = Color(0xFF151A20)
+val DarkCard          = Color(0xFF1A2027)
 
 // Glass surfaces
-val GlassWhite8       = Color(0x14FFFFFF)   // 8% white
+val GlassWhite8       = Color(0x0FFFFFFF)   // 8% white
 val GlassWhite12      = Color(0x1FFFFFFF)   // 12% white
 val GlassWhite16      = Color(0x29FFFFFF)   // 16% white
-val GlassBorder       = Color(0x33FFFFFF)   // 20% white for borders
-val GlassBorderFaint  = Color(0x1AFFFFFF)   // 10% white for subtle borders
+val GlassBorder       = Color(0x26FFFFFF)   // 20% white for borders
+val GlassBorderFaint  = Color(0x14FFFFFF)   // 10% white for subtle borders
 
 // Accent colors
-val AccentBlue        = Color(0xFF0A84FF)
-val AccentBlueDim     = Color(0xFF1A6FCC)
+val AccentBlue        = Color(0xFF4C9AFF)
+val AccentBlueDim     = Color(0xFF2F6FBF)
 val AccentPurple      = Color(0xFFBF5AF2)
 val AccentPurpleDim   = Color(0xFF9B44D0)
 val AccentCyan        = Color(0xFF32D74B).copy(alpha = 0.85f)

@@ -183,6 +183,14 @@ class MainViewModel : ViewModel() {
         Log.i(TAG, "Mounted ${parts.size} partition(s), ${volumes.size} volume(s), writable=$writable")
     }
 
+    /** Flushes pending writes and releases the drive; afterwards it is safe to unplug. */
+    fun eject() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { activeReader?.flushCache() } catch (e: Exception) { Log.w(TAG, "flush on eject failed", e) }
+            withContext(Dispatchers.Main) { disconnectDevice(); _statusMessage.value = "Safe to unplug" }
+        }
+    }
+
     fun disconnectDevice() {
         activeReader?.close()
         activeReader = null
