@@ -21,6 +21,7 @@ mount, SHA-256 comparison).
 | **APFS** | yes | experimental | in-place editing (not copy-on-write); off by default (Settings > Experimental); needs an unencrypted volume with no snapshots; creates missing chunk bitmaps (verified with `fsck_apfs`, 150 MB file across chunks) |
 | ext2/3/4 | yes | no | read-only |
 | FileVault (APFS) | yes (password or recovery key) | no | verified against a volume encrypted by macOS (`filevault.img`, tests in `FileVaultTest`); opened read-only |
+| NTFS | yes | no | MFT, attribute lists, sparse + compressed (LZNT1) files, large directories; verified on an image made by `mkntfs`/ntfs-3g (`tools/make-ntfs-fixture.sh`). Not readable: EFS-encrypted files, BitLocker volumes |
 | LUKS / LVM | partial | no | unit-untested; treat as unverified |
 
 Write operations: add files (streamed), new folder, rename, delete (recursive). Multi-partition GPT/MBR

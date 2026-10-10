@@ -120,7 +120,8 @@ fun ArchiveViewer(entry: FileSystemEntry, uri: Uri, modifier: Modifier = Modifie
         try {
             val s = ArchiveSession.open(ctx, uri, entry.name, entry.size) { copied = it } ?: run { onFail(); return@LaunchedEffect }
             session = s
-            items = withContext(Dispatchers.IO) { s.list() }
+            // macOS metadata (AppleDouble ._ files, __MACOSX, .DS_Store) is noise on a phone
+            items = withContext(Dispatchers.IO) { s.list().filter { i -> val n = i.path.substringAfterLast('/').ifEmpty { i.path.trimEnd('/').substringAfterLast('/') }; !n.startsWith("._") && n != ".DS_Store" && !i.path.startsWith("__MACOSX/") } }
         } catch (e: Throwable) {
             message = if (e.javaClass.simpleName.contains("V5")) "RAR5 archives are not supported yet" else (e.message ?: "Cannot read this archive")
             items = emptyList()
