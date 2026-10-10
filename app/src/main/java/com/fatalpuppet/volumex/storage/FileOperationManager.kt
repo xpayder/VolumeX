@@ -22,7 +22,12 @@ data class TransferProgress(
     val bytesTransferred: Long,
     val totalBytes: Long,
     val isComplete: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    /** "Verifying" while the copy is being read back and compared. */
+    val phase: String = "",
+    /** true: the copy was read back and matches the source; false: it did not; null: not verified. */
+    val verified: Boolean? = null,
+    val checksum: String? = null
 ) {
     val progressFraction: Float get() = if (totalBytes > 0) bytesTransferred.toFloat() / totalBytes else 0f
     val progressPercent: Int get() = (progressFraction * 100).toInt()

@@ -170,6 +170,7 @@ class MainViewModel : ViewModel() {
         }
         val volumes = fsReader.getVolumeInfos()
         ActiveDriveSession.reader = fsReader
+        ActiveDriveSession.device = device
         ActiveDriveSession.writer = fsWriter
         ActiveDriveSession.volumes = volumes
         _deviceState.value = DeviceState.Connected(

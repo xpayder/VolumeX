@@ -92,7 +92,9 @@ fun TransferProgressCard(
                     Text(
                         text = when {
                             progress.error != null -> progress.error
+                            progress.isComplete && progress.verified == true -> "Verified · SHA-256 ${progress.checksum?.take(12) ?: ""}…"
                             progress.isComplete -> "Complete"
+                            progress.phase.isNotEmpty() -> "${progress.phase}… ${progress.progressPercent}%"
                             else -> progress.formattedProgress
                         },
                         color = when {

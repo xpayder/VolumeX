@@ -258,6 +258,8 @@ class FileBrowserViewModel : ViewModel() {
     /** Copy files picked on the phone onto the current folder of the drive. */
     fun importUris(context: Context, uris: List<Uri>) {
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
+        val cv = copyCfg(context)
+        val manifest = ArrayList<Pair<String, String>>()
         val dest = currentPath
         Log.i(TAG, "importUris: ${uris.size} file(s) into '$dest'")
         launchTransfer(context) {
@@ -282,18 +284,36 @@ class FileBrowserViewModel : ViewModel() {
                     val size = if (size0 >= 0) size0 else resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
                     if (size < 0) throw java.io.IOException("unknown file size")
                     Log.i(TAG, "importUris: writing '$name' ($size bytes)")
+                    val md = cv.digest()
                     val ok = resolver.openInputStream(uri)?.use { input ->
-                        w.writeFileStream(parent, name, size, input) { done ->
+                        val src: java.io.InputStream = if (md != null) java.security.DigestInputStream(input, md) else input
+                        w.writeFileStream(parent, name, size, src) { done ->
                             updateProgress(progresses, idx, TransferProgress(name, done, size))
                         }
                     } ?: false
-                    updateProgress(progresses, idx, if (ok) TransferProgress(name, size, size, isComplete = true)
-                        else TransferProgress(name, 0, size, isComplete = true, error = "Write failed (name exists, drive full or unsupported name)"))
+                    var verified: Boolean? = null; var sum: String? = null
+                    if (ok && md != null) {
+                        sum = hex(md.digest())
+                        if (cv.verify) {
+                            // read the file back from the drive's media and compare it with the phone's original
+                            val written = reader?.listDirectory(currentVolumeIndex, dest)?.firstOrNull { it.name == name && !it.isDirectory }
+                            val back = written?.let { hashFromDrive(it) { n -> updateProgress(progresses, idx, TransferProgress(name, n, size, phase = "Verifying")) } }
+                            verified = back != null && back == sum
+                            if (verified == false && written != null) try { w.deleteEntry(written) } catch (_: Exception) {}
+                        }
+                        if (cv.manifest && verified != false) manifest.add(sum to name)
+                    }
+                    updateProgress(progresses, idx, when {
+                        !ok -> TransferProgress(name, 0, size, isComplete = true, error = "Write failed (name exists, drive full or unsupported name)")
+                        verified == false -> TransferProgress(name, 0, size, isComplete = true, error = "Checksum mismatch after writing - the bad copy was removed, try again")
+                        else -> TransferProgress(name, size, size, isComplete = true, verified = verified, checksum = sum)
+                    })
                 } catch (e: Exception) {
                     Log.e(TAG, "import failed: $name", e)
                     updateProgress(progresses, idx, TransferProgress(name, 0, size0.coerceAtLeast(0), isComplete = true, error = e.message ?: "Error"))
                 }
             }
+            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "VolumeX-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
     }
@@ -389,6 +409,8 @@ class FileBrowserViewModel : ViewModel() {
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val r = reader ?: return
         val dest = currentPath
+        val cv = copyCfg(context)
+        val manifest = ArrayList<Pair<String, String>>()
         launchTransfer(context) {
             val resolver = context.contentResolver
             val progresses = mutableListOf<TransferProgress>(); _transferProgress.value = emptyList()
@@ -410,12 +432,32 @@ class FileBrowserViewModel : ViewModel() {
                 } else {
                     val idx = progresses.size
                     progresses.add(TransferProgress(name, 0, size.coerceAtLeast(0))); _transferProgress.value = progresses.toList()
+                    var verified: Boolean? = null; var sum: String? = null
+                    val md = cv.digest()
                     val ok = try {
                         val sz = if (size >= 0) size else resolver.openAssetFileDescriptor(doc, "r")?.use { it.length } ?: -1L
-                        resolver.openInputStream(doc)?.use { input -> w.writeFileStream(dstParent, name, sz, input) { n -> updateProgress(progresses, idx, TransferProgress(name, n, sz)) } } ?: false
+                        val wrote = resolver.openInputStream(doc)?.use { input ->
+                            val src: java.io.InputStream = if (md != null) java.security.DigestInputStream(input, md) else input
+                            w.writeFileStream(dstParent, name, sz, src) { n -> updateProgress(progresses, idx, TransferProgress(name, n, sz)) }
+                        } ?: false
+                        if (wrote && md != null) {
+                            sum = hex(md.digest())
+                            if (cv.verify) {
+                                val written = r.listDirectory(currentVolumeIndex, dstPath).firstOrNull { it.name == name && !it.isDirectory }
+                                val back = written?.let { hashFromDrive(it) { n -> updateProgress(progresses, idx, TransferProgress(name, n, sz, phase = "Verifying")) } }
+                                verified = back != null && back == sum
+                                if (verified == false && written != null) try { w.deleteEntry(written) } catch (_: Exception) {}
+                            }
+                            if (cv.manifest && verified != false) manifest.add(sum!! to (if (dstPath == dest) "" else dstPath.removePrefix(dest).trimStart('/') + "/") + name)
+                        }
+                        wrote
                     } catch (x: Exception) { Log.e(TAG, "upload failed: $name", x); false }
-                    updateProgress(progresses, idx, if (ok) TransferProgress(name, size, size, isComplete = true) else TransferProgress(name, 0, size.coerceAtLeast(0), isComplete = true, error = "Could not write"))
-                    if (!ok) failed++
+                    updateProgress(progresses, idx, when {
+                        !ok -> TransferProgress(name, 0, size.coerceAtLeast(0), isComplete = true, error = "Could not write")
+                        verified == false -> TransferProgress(name, 0, size.coerceAtLeast(0), isComplete = true, error = "Checksum mismatch after writing - the bad copy was removed, try again")
+                        else -> TransferProgress(name, size, size, isComplete = true, verified = verified, checksum = sum)
+                    })
+                    if (!ok || verified == false) failed++
                 }
             }
             val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launchTransfer }
@@ -423,6 +465,7 @@ class FileBrowserViewModel : ViewModel() {
             var rootName = "Folder"
             resolver.query(rootDoc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) rootName = it.getString(0) ?: rootName }
             upload(rootDoc, rootName, DocumentsContract.Document.MIME_TYPE_DIR, 0, parent, dest)
+            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "VolumeX-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             say(if (failed == 0) "Folder uploaded" else "$failed item(s) failed")
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
@@ -433,9 +476,11 @@ class FileBrowserViewModel : ViewModel() {
     /** Copy files/folders to Downloads/VolumeX (no picker needed). */
     fun copyToDownloads(context: Context, items: List<FileSystemEntry>) {
         val r = reader ?: return
+        val cv = copyCfg(context)
         launchTransfer(context) {
             val base = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "VolumeX")
             val progresses = mutableListOf<TransferProgress>()
+            val manifest = ArrayList<Pair<String, String>>()
             _transferProgress.value = emptyList()
             fun uniq(dir: java.io.File, name: String): java.io.File {
                 var f = java.io.File(dir, name); var n = 1
@@ -454,59 +499,131 @@ class FileBrowserViewModel : ViewModel() {
                 dir.mkdirs()
                 val dest = uniq(dir, e.name)
                 try {
+                    val md = cv.digest()
                     val ok = java.io.BufferedOutputStream(java.io.FileOutputStream(dest), 1 shl 20).use { out ->
-                        r.readFileTo(e, out) { n -> updateProgress(progresses, idx, TransferProgress(e.name, n, e.size)) }
+                        val sink: java.io.OutputStream = if (md != null) java.security.DigestOutputStream(out, md) else out
+                        r.readFileTo(e, sink) { n -> updateProgress(progresses, idx, TransferProgress(e.name, n, e.size)) }
                     }
                     if (!ok) dest.delete()
-                    updateProgress(progresses, idx, if (ok) TransferProgress(e.name, e.size, e.size, isComplete = true)
-                        else TransferProgress(e.name, 0, e.size, isComplete = true, error = "Could not read file from the drive"))
+                    var verified: Boolean? = null; var sum: String? = null
+                    if (ok && md != null) {
+                        sum = hex(md.digest())
+                        if (cv.verify) {
+                            // read the copy back from the phone's storage and compare it with what came off the drive
+                            val back = java.io.FileInputStream(dest).use { ins -> hashStream(ins) { n -> updateProgress(progresses, idx, TransferProgress(e.name, n, e.size, phase = "Verifying")) } }
+                            verified = back == sum
+                            if (verified == false) dest.delete()
+                        }
+                        if (cv.manifest && verified != false) manifest.add(sum to dest.relativeTo(base).path)
+                    }
+                    updateProgress(progresses, idx, when {
+                        !ok -> TransferProgress(e.name, 0, e.size, isComplete = true, error = "Could not read file from the drive")
+                        verified == false -> TransferProgress(e.name, 0, e.size, isComplete = true, error = "Checksum mismatch after copying - the bad copy was removed, try again")
+                        else -> TransferProgress(e.name, e.size, e.size, isComplete = true, verified = verified, checksum = sum)
+                    })
                 } catch (x: Exception) {
                     dest.delete(); Log.e(TAG, "copyToDownloads failed: ${e.name}", x)
                     updateProgress(progresses, idx, TransferProgress(e.name, 0, e.size, isComplete = true, error = x.message ?: "Error"))
                 }
             }
             items.forEach { copyOne(it, base) }
-            say("Saved to Downloads/VolumeX")
+            if (cv.manifest && manifest.isNotEmpty()) java.io.File(base, "VolumeX-${stamp()}.sha256").writeText(manifestText(manifest))
+            val bad = progresses.count { it.error != null }
+            say(if (bad == 0) (if (cv.verify) "Saved and verified in Downloads/VolumeX" else "Saved to Downloads/VolumeX") else "$bad file(s) failed - see the transfer list")
             _selectedEntries.value = emptySet()
         }
     }
+
+    // ── Verified copies ───────────────────────────────────────────────────────
+
+    private class CopyCfg(val verify: Boolean, val manifest: Boolean) {
+        fun digest(): java.security.MessageDigest? = if (verify || manifest) java.security.MessageDigest.getInstance("SHA-256") else null
+    }
+    private fun copyCfg(ctx: Context): CopyCfg {
+        val p = ctx.getSharedPreferences("vx_prefs", Context.MODE_PRIVATE)
+        return CopyCfg(p.getBoolean("verify_copies", true), p.getBoolean("write_manifest", false))
+    }
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+
+    /** SHA-256 of a stream, reporting bytes read. */
+    private fun hashStream(input: java.io.InputStream, onBytes: (Long) -> Unit): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256"); val buf = ByteArray(1 shl 20); var done = 0L
+        while (true) { val n = input.read(buf); if (n <= 0) break; md.update(buf, 0, n); done += n; onBytes(done) }
+        return hex(md.digest())
+    }
+
+    /** Reads a file back from the drive (after dropping device caches) and returns its SHA-256, or null if it cannot be read. */
+    private fun hashFromDrive(entry: FileSystemEntry, onBytes: (Long) -> Unit): String? {
+        val r = reader ?: return null
+        ActiveDriveSession.device?.let { it.flushCache(); it.dropReadCache() }
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val sink = object : java.io.OutputStream() {
+            override fun write(b: Int) { md.update(b.toByte()) }
+            override fun write(b: ByteArray, o: Int, l: Int) { md.update(b, o, l) }
+        }
+        return if (r.readFileTo(entry, sink, onBytes)) hex(md.digest()) else null
+    }
+
+    private fun manifestText(lines: List<Pair<String, String>>) = lines.joinToString("") { "${it.first}  ${it.second}\n" }
+    private fun stamp() = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
 
     fun entriesByPaths(paths: Set<String>): List<FileSystemEntry> = _entries.value.filter { it.path in paths }
 
     fun copyToTree(context: Context, treeUri: Uri, items: List<FileSystemEntry>) {
         val r = reader ?: return
         val resolver = context.contentResolver
+        val cv = copyCfg(context)
         launchTransfer(context) {
             val rootDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
             val progresses = mutableListOf<TransferProgress>()
+            val manifest = ArrayList<Pair<String, String>>()
             _transferProgress.value = emptyList()
 
-            fun copyOne(entry: FileSystemEntry, parentDoc: Uri) {
+            fun copyOne(entry: FileSystemEntry, parentDoc: Uri, rel: String) {
                 if (entry.isDirectory) {
                     val dirDoc = DocumentsContract.createDocument(resolver, parentDoc, DocumentsContract.Document.MIME_TYPE_DIR, entry.name) ?: return
-                    r.listDirectory(currentVolumeIndex, entry.path).forEach { copyOne(it, dirDoc) }
+                    r.listDirectory(currentVolumeIndex, entry.path).forEach { copyOne(it, dirDoc, rel + entry.name + "/") }
                     return
                 }
                 val idx = progresses.size
                 progresses.add(TransferProgress(entry.name, 0, entry.size))
                 _transferProgress.value = progresses.toList()
                 val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(entry.extension) ?: "application/octet-stream"
+                var doc: Uri? = null
                 try {
-                    val doc = DocumentsContract.createDocument(resolver, parentDoc, mime, entry.name)
+                    doc = DocumentsContract.createDocument(resolver, parentDoc, mime, entry.name)
                         ?: throw java.io.IOException("cannot create file in the chosen folder")
+                    val md = cv.digest()
                     val ok = resolver.openOutputStream(doc)?.use { out ->
                         val buffered = java.io.BufferedOutputStream(out, 1 shl 20)
-                        val done = r.readFileTo(entry, buffered) { n -> updateProgress(progresses, idx, TransferProgress(entry.name, n, entry.size)) }
-                        buffered.flush(); done
+                        val sink: java.io.OutputStream = if (md != null) java.security.DigestOutputStream(buffered, md) else buffered
+                        val done = r.readFileTo(entry, sink) { n -> updateProgress(progresses, idx, TransferProgress(entry.name, n, entry.size)) }
+                        sink.flush(); done
                     } ?: false
-                    updateProgress(progresses, idx, if (ok) TransferProgress(entry.name, entry.size, entry.size, isComplete = true)
-                        else TransferProgress(entry.name, 0, entry.size, isComplete = true, error = "Could not read file from the drive"))
+                    var verified: Boolean? = null; var sum: String? = null
+                    if (ok && md != null) {
+                        sum = hex(md.digest())
+                        if (cv.verify) {
+                            val back = resolver.openInputStream(doc)?.use { ins -> hashStream(ins) { n -> updateProgress(progresses, idx, TransferProgress(entry.name, n, entry.size, phase = "Verifying")) } }
+                            verified = back == sum
+                            if (verified == false) try { DocumentsContract.deleteDocument(resolver, doc) } catch (_: Exception) {}
+                        }
+                        if (cv.manifest && verified != false) manifest.add(sum to rel + entry.name)
+                    }
+                    updateProgress(progresses, idx, when {
+                        !ok -> TransferProgress(entry.name, 0, entry.size, isComplete = true, error = "Could not read file from the drive")
+                        verified == false -> TransferProgress(entry.name, 0, entry.size, isComplete = true, error = "Checksum mismatch after copying - the bad copy was removed, try again")
+                        else -> TransferProgress(entry.name, entry.size, entry.size, isComplete = true, verified = verified, checksum = sum)
+                    })
                 } catch (e: Exception) {
                     Log.e(TAG, "copyToTree failed: ${entry.name}", e)
                     updateProgress(progresses, idx, TransferProgress(entry.name, 0, entry.size, isComplete = true, error = e.message ?: "Error"))
                 }
             }
-            items.forEach { copyOne(it, rootDoc) }
+            items.forEach { copyOne(it, rootDoc, "") }
+            if (cv.manifest && manifest.isNotEmpty()) try {
+                DocumentsContract.createDocument(resolver, rootDoc, "text/plain", "VolumeX-${stamp()}.sha256")?.let { d -> resolver.openOutputStream(d)?.use { it.write(manifestText(manifest).toByteArray()) } }
+            } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             _selectedEntries.value = emptySet()
         }
     }

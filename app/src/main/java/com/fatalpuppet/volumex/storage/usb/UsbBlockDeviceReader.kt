@@ -743,6 +743,8 @@ class UsbBlockDeviceReader(
         return rawRead(startLba, count)
     }
 
+    override fun dropReadCache() { synchronized(cache) { cache.clear() } }
+
     private fun invalidate(lba: Long, count: Int) = synchronized(cache) {
         for (c in (lba / chunkSectors)..((lba + count - 1) / chunkSectors)) cache.remove(c)
     }

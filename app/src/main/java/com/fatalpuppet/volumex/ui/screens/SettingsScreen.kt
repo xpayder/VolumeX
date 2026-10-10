@@ -120,6 +120,27 @@ fun SettingsScreen(
                     }
                 }
                 item {
+                    val tprefs = remember { context.getSharedPreferences("vx_prefs", android.content.Context.MODE_PRIVATE) }
+                    var verify by remember { mutableStateOf(tprefs.getBoolean("verify_copies", true)) }
+                    var manifest by remember { mutableStateOf(tprefs.getBoolean("write_manifest", false)) }
+                    SettingsSection(title = "Transfers") {
+                        SettingsToggleRow(
+                            icon = Icons.Default.Check,
+                            title = "Verify copies",
+                            subtitle = "After each copy the file is read back and compared (SHA-256) with the original. Slower, but a damaged copy is caught and removed instead of silently kept.",
+                            checked = verify,
+                            onToggle = { verify = !verify; tprefs.edit().putBoolean("verify_copies", verify).apply() }
+                        )
+                        SettingsToggleRow(
+                            icon = Icons.Default.Description,
+                            title = "Write a checksum list",
+                            subtitle = "Adds a VolumeX-<date>.sha256 file next to the copied files. On a Mac or Linux, `shasum -a 256 -c` against it re-checks everything later.",
+                            checked = manifest,
+                            onToggle = { manifest = !manifest; tprefs.edit().putBoolean("write_manifest", manifest).apply() }
+                        )
+                    }
+                }
+                item {
                     SettingsSection(title = "File Browser") {
                         SettingsToggleRow(
                             icon = Icons.Default.VisibilityOff,

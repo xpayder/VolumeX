@@ -13,6 +13,8 @@ object ActiveDriveSession {
     @Volatile var writer: FileSystemWriter? = null
     @Volatile var currentVolumeIndex: Int = 0
     @Volatile var volumes: List<VolumeInfo> = emptyList()
+    /** The raw block device, so a verification pass can flush writes and drop read caches before reading a file back. */
+    @Volatile var device: com.fatalpuppet.volumex.storage.disk.BlockDeviceReader? = null
     @Volatile var currentPath: String = "/"
 
     fun clear() {
@@ -20,6 +22,7 @@ object ActiveDriveSession {
         writer = null
         currentVolumeIndex = 0
         volumes = emptyList()
+        device = null
         currentPath = "/"
     }
 }

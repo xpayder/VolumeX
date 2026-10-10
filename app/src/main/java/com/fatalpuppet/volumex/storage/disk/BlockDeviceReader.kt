@@ -17,6 +17,8 @@ interface BlockDeviceReader {
         }
         return out
     }
+    /** Forget cached reads, so the next read really comes from the media (used when verifying a write). */
+    fun dropReadCache() {}
     fun writeSector(lba: Long, data: ByteArray): Boolean = false
     fun writeSectors(startLba: Long, data: ByteArray): Boolean {
         val ss = sectorSize()
