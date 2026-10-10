@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The "F" is a drive bay: stem + two data lanes, the lower lane ends in an activity LED. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -8,11 +7,11 @@
     <path
         android:fillColor="#00000000"
         android:pathData="M73,33 H42 V76 M42,54 H62"
-        android:strokeColor="#FFF4F7F8"
+        android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:strokeWidth="11" />
     <path
-        android:fillColor="#FF5BE3C0"
+        android:fillColor="#FF000000"
         android:pathData="M73.5,54 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
 </vector>

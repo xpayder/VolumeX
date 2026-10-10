@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VolumeX"
+rootProject.name = "FeldKit"
 include(":app")

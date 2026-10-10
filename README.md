@@ -1,8 +1,43 @@
-# VolumeX
+<p align="center">
+  <img src="docs/assets/logo.svg" width="128" alt="FeldKit logo">
+</p>
 
-VolumeX is a free, open-source Android app that reads (and writes) Apple APFS and HFS+ formatted drives over USB OTG — without root, without a Mac, without an account.
+<h1 align="center">FeldKit</h1>
 
-> VolumeX aims to become the open-source reference implementation for reading fancy, legacy, and otherwise uncommon filesystems on Android.
+<p align="center"><b>Open Mac and Windows drives on your Android phone. Free, open source, no root, no account.</b></p>
+
+<p align="center">
+APFS &middot; HFS+ &middot; NTFS &middot; exFAT &middot; FAT32 &middot; FileVault &middot; BitLocker
+</p>
+
+FeldKit is a field kit for people who work with drives: musicians, sound designers, photographers, videographers and
+DITs, designers, animators, developers. When the laptop is not around, plug the SSD or card reader into your phone over
+USB-C / OTG, see the files, play and preview them, check them, and copy them off (or on) with proof that nothing got
+corrupted. No paid "drive reader" subscription needed.
+
+## Does this solve your problem?
+
+| You searched for | FeldKit |
+|---|---|
+| "Android can't read my Mac SSD / APFS drive" | reads APFS and HFS+, writes experimentally |
+| "Android says drive is unsupported / needs formatting (NTFS)" | reads NTFS, writes experimentally |
+| "open BitLocker drive on Android phone" | unlocks with password or 48-digit recovery key |
+| "open FileVault encrypted external drive without a Mac" | unlocks with password or recovery key (read-only) |
+| "copy footage from SSD to phone and verify the copy" | SHA-256 verified copy + `.sha256` manifest |
+| "play ProRes / DNxHD / FLAC / AIFF from USB drive on Android" | built-in player with a libVLC fallback |
+| "view RAW photos / PSD / EXIF from a card on my phone" | viewer with zoom and an EXIF panel |
+| "unzip / unrar from an external drive on Android" | built-in archive browser and extractor |
+
+## Screenshots
+
+<!-- Screenshots are added once the interface is finished. See docs/screenshots/README.md -->
+<p align="center"><i>Screenshots coming soon.</i></p>
+
+## Origin
+
+FeldKit is a fork of [VolumeX](https://github.com/FatalPuppet/VolumeX) by Mirko A. Calvi (FatalPuppet), MIT licensed.
+The original author built the USB transport and the first APFS / HFS+ readers; if this app saves you money or a
+deadline, consider thanking them. Details in [CREDITS.md](CREDITS.md).
 
 ---
 

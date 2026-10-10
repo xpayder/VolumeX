@@ -8,7 +8,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.fatalpuppet.volumex"
+        applicationId = "app.feldkit"
         minSdk = 29
         targetSdk = 37
         versionCode = 1
