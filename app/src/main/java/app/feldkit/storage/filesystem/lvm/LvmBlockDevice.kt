@@ -12,7 +12,9 @@ import app.feldkit.storage.disk.BlockDeviceReader
 class LvmBlockDevice(
     private val pv: BlockDeviceReader,
     private val lv: LvmLogicalVolume,
-    private val extentSizeSectors: Long  // extent_size from VG metadata (in 512-byte sectors)
+    private val extentSizeSectors: Long,  // extent_size from VG metadata (in 512-byte sectors)
+    /** Where the PV's data area (first extent) starts, in sectors: pe_start from the PV header. */
+    private val dataOffsetSectors: Long = 0L
 ) : BlockDeviceReader {
 
     companion object {
@@ -34,6 +36,20 @@ class LvmBlockDevice(
         return pv.readSector(pvLba)
     }
 
+    /** Reads follow the extent map in whole runs instead of one sector at a time. */
+    override fun readSectors(startLba: Long, count: Int): ByteArray? {
+        val out = ByteArray(count * sectorSize()); var done = 0
+        while (done < count) {
+            val lba = startLba + done
+            val (pvLba, _) = mapLba(lba) ?: return null
+            val inExtent = (extentSizeSectors - lba % extentSizeSectors).toInt()
+            val n = minOf(count - done, inExtent)
+            val b = pv.readSectors(pvLba, n) ?: return null
+            System.arraycopy(b, 0, out, done * sectorSize(), b.size); done += n
+        }
+        return out
+    }
+
     override fun writeSector(lba: Long, data: ByteArray): Boolean {
         val (pvLba, _) = mapLba(lba) ?: return false
         return pv.writeSector(pvLba, data)
@@ -52,7 +68,7 @@ class LvmBlockDevice(
         for (seg in lv.segments) {
             if (logicalExtent >= seg.startExtent && logicalExtent < seg.startExtent + seg.extentCount) {
                 val extentOffset = logicalExtent - seg.startExtent
-                val pvLba = (seg.pvStartExtent + extentOffset) * extentSizeSectors + offsetInExtent
+                val pvLba = dataOffsetSectors + (seg.pvStartExtent + extentOffset) * extentSizeSectors + offsetInExtent
                 return Pair(pvLba, seg.pvName)
             }
         }

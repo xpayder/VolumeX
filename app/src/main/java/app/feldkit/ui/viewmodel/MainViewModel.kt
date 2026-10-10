@@ -7,7 +7,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.feldkit.storage.ActiveDriveSession
-import app.feldkit.storage.crypto.LuksDecryptor
 import app.feldkit.storage.disk.BlockDeviceReader
 import app.feldkit.storage.filesystem.FileSystemReader
 import app.feldkit.storage.filesystem.CompositeReader
@@ -63,7 +62,6 @@ class MainViewModel : ViewModel() {
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
     private var activeReader: UsbBlockDeviceReader? = null
-    private var pendingLuksDevice: UsbBlockDeviceReader? = null
 
     fun connectDevice(context: Context, device: UsbDevice) {
         viewModelScope.launch {
@@ -97,15 +95,6 @@ class MainViewModel : ViewModel() {
 
                     activeReader = reader
 
-                    // Check for LUKS encryption first
-                    val luksDecryptor = LuksDecryptor(reader)
-                    if (luksDecryptor.detect() > 0) {
-                        pendingLuksDevice = reader
-                        _deviceState.value = DeviceState.NeedsPassphrase("LUKS encrypted volume")
-                        _statusMessage.value = "Encrypted volume – enter passphrase"
-                        return@withContext
-                    }
-
                     mountWithDevice(reader, device.productName ?: "USB Drive")
 
                 } catch (e: Exception) {
@@ -130,23 +119,6 @@ class MainViewModel : ViewModel() {
                 } catch (e: Exception) {
                     Log.e(TAG, "mountImage failed", e)
                     _deviceState.value = DeviceState.Error("Image error: ${e.message}")
-                }
-            }
-        }
-    }
-
-    fun unlockLuks(passphrase: String) {
-        val rawDevice = pendingLuksDevice ?: return
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val decryptor = LuksDecryptor(rawDevice)
-                val decrypted = decryptor.unlock(passphrase)
-                if (decrypted == null) {
-                    _deviceState.value = DeviceState.Error("Wrong passphrase or unsupported LUKS format")
-                    _statusMessage.value = "Decryption failed"
-                } else {
-                    pendingLuksDevice = null
-                    mountWithDevice(decrypted, "Encrypted USB Drive")
                 }
             }
         }

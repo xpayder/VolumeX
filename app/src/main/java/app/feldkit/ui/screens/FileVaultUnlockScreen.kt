@@ -56,7 +56,7 @@ fun FileVaultUnlockScreen(
         scope.launch {
             val ok = onUnlock(secret.trim().let { if (recoveryMode) it else secret })
             busy = false
-            if (ok) onSuccess() else error = if (recoveryMode) "That recovery key didn't unlock this drive." else "Wrong password. Try again."
+            if (ok) onSuccess() else error = if (recoveryMode) "That recovery key didn't unlock this drive." else (app.feldkit.storage.crypto.Luks.lastFailure ?: "Wrong password. Try again.")
         }
     }
 
@@ -110,13 +110,13 @@ fun FileVaultUnlockScreen(
             ) {
                 if (busy) {
                     CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(10.dp)); Text("Unlocking…", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Spacer(Modifier.width(10.dp)); Text(if (volume.encryption == "LUKS") "Unlocking… (can take a minute)" else "Unlocking…", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 } else {
                     Icon(Icons.Default.LockOpen, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
                     Text("Unlock drive", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 }
             }
-            TextButton(onClick = { recoveryMode = !recoveryMode; secret = ""; error = null }, enabled = !busy) {
+            if (volume.encryption != "LUKS") TextButton(onClick = { recoveryMode = !recoveryMode; secret = ""; error = null }, enabled = !busy) {
                 Text(if (recoveryMode) "Use password instead" else "Use recovery key instead", color = Accent, fontSize = 14.sp)
             }
 

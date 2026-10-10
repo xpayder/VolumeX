@@ -63,14 +63,15 @@ mount, SHA-256 comparison).
 | **FAT32** | yes | yes | long names, `~N` aliases, FSInfo |
 | **HFS+ / HFS+J** | yes | yes | catalog B-tree split/merge, attribute cleanup on delete; refuses unclean/journal-pending volumes |
 | **APFS** | yes | experimental | in-place editing (not copy-on-write); off by default (Settings > Experimental); needs an unencrypted volume with no snapshots; creates missing chunk bitmaps (verified with `fsck_apfs`, 150 MB file across chunks) |
-| ext2/3/4 | yes | no | read-only |
+| ext2/3/4 | yes | no | block maps and extent trees, 64-bit, flex_bg, hash-tree directories, streamed reads; checked against volumes made by `mkfs.ext4` (`tools/linux/make-luks-lvm.sh`) |
 | FileVault (APFS) | yes (password or recovery key) | no | verified against a volume encrypted by macOS (`filevault.img`, tests in `FileVaultTest`); opened read-only |
 | NTFS | yes | experimental | MFT, attribute lists, sparse + compressed (LZNT1) files, large directories; verified on an image made by `mkntfs`/ntfs-3g (`tools/make-ntfs-fixture.sh`). Write (off by default): create / rename / delete with MFT growth and B+tree index splits, refuses dirty or hibernated volumes; verified with ntfs-3g and `ntfsresize` (`tools/verify-ntfs.sh`), **not** with Windows chkdsk. Not readable: EFS-encrypted files |
 | BitLocker (Windows 7+, To Go) | yes (password or 48-digit recovery key) | no | XTS and CBC ciphers (not the Windows 7 diffuser mode); NTFS / exFAT / FAT32 inside; fixtures opened by cryptsetup and dislocker (`tools/make-bitlocker.py`) |
 | ISO 9660 (+ Joliet, Rock Ridge) | yes | no | optical images and installer sticks; open an `.iso` / `.img` from inside a drive and browse it without unpacking. Checked against images from `hdiutil` and `xorriso` (`tools/make-iso-fixtures.sh`, `tools/make-iso-rr.sh`) |
 | UDF | yes | no | DVD / Blu-ray images; plain and sparable partitions (not CD-RW virtual partitions). Checked against `hdiutil` images |
 | Apple disk images (.dmg) | yes | no | UDRO / UDZO (zlib) / UDBZ (bzip2) holding HFS+ (APM or GPT); LZFSE (ULFO / ULMO) is recognised but not supported yet |
-| LUKS / LVM | partial | no | unit-untested; treat as unverified |
+| LUKS 1 / LUKS 2 | yes (passphrase) | no | AES-XTS and AES-CBC (plain / plain64 / ESSIV); PBKDF2, Argon2i and Argon2id (a 1 GiB Argon2id keyslot unlocks in about 50 s on a Galaxy S21 FE); not serpent / twofish. Verified against containers made by `cryptsetup` 2.7 and the RFC 9106 Argon2 vectors |
+| LVM 2 | yes | no | physical volumes holding one or more logical volumes (linear); each logical volume is its own volume. Verified against `lvm2` images; no RAID / thin / striped |
 
 Write operations: add files (streamed), new folder, rename, delete (recursive). Multi-partition GPT/MBR
 drives are supported (EFI partition skipped).

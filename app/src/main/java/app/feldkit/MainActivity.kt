@@ -100,6 +100,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "FeldKit MainActivity starting")
 
+        app.feldkit.storage.crypto.Argon2.tempDir = cacheDir
         transferViewModel.initialize(this)
         app.feldkit.storage.filesystem.FilesystemMounter.enableApfsWrite =
             getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("apfs_write", false)

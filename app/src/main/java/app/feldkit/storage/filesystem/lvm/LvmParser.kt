@@ -30,7 +30,8 @@ data class LvmPhysicalVolume(
     val uuid: String,
     val deviceSizeBytes: Long,
     val metadataOffset: Long,
-    val metadataSize: Long
+    val metadataSize: Long,
+    val dataOffsetBytes: Long = 0L
 )
 
 data class LvmLogicalVolume(
@@ -90,7 +91,7 @@ object LvmParser {
         val mda0size = pvBuf.getLong()
 
         Log.d(TAG, "LVM PV: uuid=$uuid deviceSize=$deviceSize mda0off=$mda0off mda0size=$mda0size")
-        return LvmPhysicalVolume(uuid, deviceSize, mda0off, mda0size)
+        return LvmPhysicalVolume(uuid, deviceSize, mda0off, mda0size, da0off)
     }
 
     fun readVgMetadata(blockDevice: BlockDeviceReader, pv: LvmPhysicalVolume): String? {
@@ -101,18 +102,16 @@ object LvmParser {
         val mdaSector1 = blockDevice.readSector(mdaSector + 1) ?: ByteArray(512)
         val mdaData = mdaSector0 + mdaSector1
 
-        if (mdaOff + 512 > mdaData.size) return null
-        val magic = mdaData.sliceArray(mdaOff until mdaOff + 16)
+        if (mdaOff + 64 > mdaData.size) return null
+        // mda_header: checksum(4) magic(16) version(4) start(8) size(8) raw_locn[0]: offset(8) size(8)
+        val magic = mdaData.sliceArray(mdaOff + 4 until mdaOff + 20)
         if (!magic.contentEquals(MDA_MAGIC)) {
             Log.w(TAG, "LVM: MDA magic mismatch")
             return null
         }
-
-        val buf = ByteBuffer.wrap(mdaData, mdaOff + 16, 40).order(ByteOrder.LITTLE_ENDIAN)
-        val version = buf.getInt()
+        val buf = ByteBuffer.wrap(mdaData, mdaOff + 24, 40).order(ByteOrder.LITTLE_ENDIAN)
         val mdaStart = buf.getLong()
         val mdaSize = buf.getLong()
-        // raw_locn[0]
         val rlocnOffset = buf.getLong()
         val rlocnSize = buf.getLong()
 
@@ -136,22 +135,38 @@ object LvmParser {
         return String(textBytes, Charsets.UTF_8)
     }
 
+    /** Body (between the braces) of the block that starts at the "{" at [open], and the index after its closing "}". */
+    private fun blockBody(t: String, open: Int): Pair<String, Int> {
+        var depth = 0; var i = open
+        while (i < t.length) {
+            when (t[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) return t.substring(open + 1, i) to i + 1 } }
+            i++
+        }
+        return t.substring(open + 1) to t.length
+    }
+
+    /** The "name { ... }" children found directly inside [body]. */
+    private fun children(body: String): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        val head = Regex("""([A-Za-z0-9_.+-]+)\s*\{""")
+        var pos = 0
+        while (true) {
+            val m = head.find(body, pos) ?: break
+            val (inner, next) = blockBody(body, m.range.last)
+            out.add(m.groupValues[1] to inner)
+            pos = next
+        }
+        return out
+    }
+
     fun parseLogicalVolumes(vgMetadata: String): List<LvmLogicalVolume> {
         val lvs = mutableListOf<LvmLogicalVolume>()
-
-        // Find "logical_volumes {" block
-        val lvBlockRe = Regex("""logical_volumes\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""", RegexOption.DOT_MATCHES_ALL)
-        val lvBlock = lvBlockRe.find(vgMetadata)?.groupValues?.get(1) ?: return lvs
-
-        // Find each LV entry
-        val lvRe = Regex("""(\w+)\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""", RegexOption.DOT_MATCHES_ALL)
-        lvRe.findAll(lvBlock).forEach { lvMatch ->
-            val lvName = lvMatch.groupValues[1]
-            val lvBody = lvMatch.groupValues[2]
+        val m = Regex("""logical_volumes\s*\{""").find(vgMetadata) ?: return lvs
+        val (lvBlock, _) = blockBody(vgMetadata, m.range.last)
+        for ((lvName, lvBody) in children(lvBlock)) {
             val uuid = extractMdaStr(lvBody, "id") ?: ""
-            val segCount = extractMdaInt(lvBody, "segment_count") ?: 0
             val segments = parseSegments(lvBody)
-            lvs.add(LvmLogicalVolume(lvName, uuid, segCount, segments))
+            lvs.add(LvmLogicalVolume(lvName, uuid, extractMdaInt(lvBody, "segment_count") ?: segments.size, segments))
         }
         return lvs
     }
@@ -162,17 +177,12 @@ object LvmParser {
 
     private fun parseSegments(lvBody: String): List<LvmSegment> {
         val segs = mutableListOf<LvmSegment>()
-        val segRe = Regex("""segment\d+\s*\{([^}]*)\}""", RegexOption.DOT_MATCHES_ALL)
-        segRe.findAll(lvBody).forEach { sm ->
-            val sb = sm.groupValues[1]
+        for ((name, sb) in children(lvBody)) {
+            if (!name.startsWith("segment")) continue
             val startExtent = extractMdaLong(sb, "start_extent") ?: 0L
             val extentCount = extractMdaLong(sb, "extent_count") ?: 0L
-            // stripes = ["pvname", pvStartExtent]
-            val stripesRe = Regex(""""([^"]+)"\s*,\s*(\d+)""")
-            val stripeMatch = stripesRe.find(sb)
-            val pvName = stripeMatch?.groupValues?.get(1) ?: ""
-            val pvStart = stripeMatch?.groupValues?.get(2)?.toLongOrNull() ?: 0L
-            segs.add(LvmSegment(startExtent, extentCount, pvName, pvStart))
+            val stripeMatch = Regex(""""([^"]+)"\s*,\s*(\d+)""").find(sb)         // stripes = ["pv0", firstExtent]
+            segs.add(LvmSegment(startExtent, extentCount, stripeMatch?.groupValues?.get(1) ?: "", stripeMatch?.groupValues?.get(2)?.toLongOrNull() ?: 0L))
         }
         return segs
     }

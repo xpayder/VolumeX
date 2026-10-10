@@ -47,9 +47,10 @@ object FilesystemMounter {
             val meta = pv?.let { LvmParser.readVgMetadata(device, it) }
             val lvs = meta?.let { LvmParser.parseLogicalVolumes(it) }.orEmpty()
             if (pv != null && meta != null && lvs.isNotEmpty()) {
-                Log.i(TAG, "LVM: found ${lvs.size} logical volume(s), using first: ${lvs[0].name}")
-                val lv = LvmBlockDevice(device, lvs[0], LvmParser.parseExtentSize(meta))
-                return probeStarts(lv, listOf(0L, 40L, 56L, 64L, 128L, 2048L))
+                Log.i(TAG, "LVM: found ${lvs.size} logical volume(s): ${lvs.joinToString { it.name }}")
+                val extent = LvmParser.parseExtentSize(meta)
+                val all = lvs.flatMap { lv -> probeStarts(LvmBlockDevice(device, lv, extent, pv.dataOffsetBytes / 512), listOf(0L)) }
+                if (all.isNotEmpty()) return all
             }
         }
 
@@ -64,7 +65,7 @@ object FilesystemMounter {
     private fun probeStarts(device: BlockDeviceReader, starts: List<Long>): List<MountedPartition> {
         val out = ArrayList<MountedPartition>()
         for (lba in starts.distinct()) {
-            val m = tryBitLocker(device, lba) ?: tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
+            val m = tryBitLocker(device, lba) ?: tryLuks(device, lba) ?: tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
                 ?: tryExFat(device, lba) ?: tryExt(device, lba) ?: tryUdf(device, lba) ?: tryIso(device, lba)
             if (m != null) out.add(MountedPartition(m.first, m.second, lba))
         }
@@ -131,6 +132,13 @@ object FilesystemMounter {
         val sector = device.readSector(headerSector) ?: return Pair(reader, null)
         val header = HfsPlusVolumeHeaderParser.parse(sector) ?: return Pair(reader, null)
         return Pair(reader, HfsPlusWriter(device, lba, header))
+    }
+
+    private fun tryLuks(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+        val reader = app.feldkit.storage.filesystem.luks.LuksReader(device, lba)
+        if (!reader.mount()) return null
+        Log.i(TAG, "LUKS at LBA $lba")
+        return Pair(reader, null)
     }
 
     private fun tryBitLocker(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
