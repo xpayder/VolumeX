@@ -91,10 +91,7 @@ fun PlayerState.attach(onTransition: ((String?) -> Unit)? = null): () -> Unit {
 fun rememberPlayerState(uri: Uri): PlayerState {
     val ctx = LocalContext.current
     val state = remember(uri) {
-        val p = ExoPlayer.Builder(ctx).build().apply {
-            setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
-            setMediaItem(MediaItem.fromUri(uri)); prepare(); playWhenReady = true
-        }
+        val p = newDrivePlayer(ctx).apply { setMediaItem(MediaItem.fromUri(uri)); prepare(); playWhenReady = true }
         PlayerState(p)
     }
     DisposableEffect(state) {

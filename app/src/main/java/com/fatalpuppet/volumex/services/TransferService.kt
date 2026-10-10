@@ -33,6 +33,26 @@ class TransferService : Service() {
         private const val TAG = "VolumeX"
         const val NOTIF_ID = 1001
         const val CHANNEL_ID = "transfers"
+
+        private var holders = 0
+        @Volatile private var instance: TransferService? = null
+        @Volatile private var stopWhenReady = false
+
+        /** Keeps the process (and the USB session) alive while a copy runs, even with the screen off or the app in the background. */
+        @Synchronized fun begin(ctx: android.content.Context) {
+            if (holders++ == 0) {
+                stopWhenReady = false
+                try { androidx.core.content.ContextCompat.startForegroundService(ctx.applicationContext, Intent(ctx.applicationContext, TransferService::class.java)) } catch (e: Exception) { Log.w(TAG, "cannot start transfer service", e) }
+            }
+        }
+
+        /** Stops the service once the last copy is done. A stop that arrives before the service called startForeground() waits for it. */
+        @Synchronized fun end(@Suppress("UNUSED_PARAMETER") ctx: android.content.Context) {
+            if (holders > 0 && --holders == 0) {
+                val s = instance
+                if (s != null) s.stopSelf() else stopWhenReady = true
+            }
+        }
     }
 
     inner class TransferBinder : Binder() {
@@ -49,14 +69,17 @@ class TransferService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Transfer service started"))
+        startForeground(NOTIF_ID, buildNotification("Transferring files - keep the drive connected"))
+        instance = this
         Log.i(TAG, "TransferService: created")
+        if (stopWhenReady) { stopWhenReady = false; stopSelf() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         Log.i(TAG, "TransferService: destroyed")
     }
 

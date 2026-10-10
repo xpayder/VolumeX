@@ -76,6 +76,8 @@ fun FilePreviewScreen(
     var zoomed by remember { mutableStateOf(false) }
     var failed by remember(current.path) { mutableStateOf(false) }
     var showExif by remember { mutableStateOf(false) }
+    var showMediaInfo by remember { mutableStateOf(false) }
+    var hexMode by remember(current.path) { mutableStateOf(false) }
 
     // landscape + hidden system bars while a video is fullscreen
     val activity = context as? android.app.Activity
@@ -116,6 +118,7 @@ fun FilePreviewScreen(
                 Text(current.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(if (items.size > 1) "${position + 1} of ${items.size} · ${current.formattedSize}" else current.formattedSize, color = TextTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            if (type == FileType.AUDIO || type == FileType.VIDEO) IconButton(onClick = { showMediaInfo = true }) { Icon(Icons.Default.Info, "Media info", tint = TextSecondary) }
             if (type == FileType.IMAGE) IconButton(onClick = { showExif = true }) { Icon(Icons.Default.Info, "Photo info", tint = TextSecondary) }
             IconButton(onClick = { openExternal(context, current) }) { Icon(Icons.Default.OpenInNew, "Open with", tint = TextSecondary) }
             IconButton(onClick = { share(context, current) }) { Icon(Icons.Default.Share, "Share", tint = TextSecondary) }
@@ -132,7 +135,7 @@ fun FilePreviewScreen(
                     val e = items[page]
                     if (e.fileType == FileType.IMAGE) {
                         Zoomable(Modifier.fillMaxSize(), onTap = { chrome = !chrome }, onZoomedChange = { if (page == pager.currentPage) zoomed = it }) {
-                            if (e.isRaw) RawImage(uriOf(e), thumb = false, modifier = Modifier.fillMaxSize())
+                            if (e.isRaw || e.isPsd) RawImage(uriOf(e), thumb = false, modifier = Modifier.fillMaxSize(), psd = e.isPsd)
                             else AsyncImage(
                                 model = ImageRequest.Builder(context).data(uriOf(e)).crossfade(true).build(), imageLoader = loader,
                                 contentDescription = e.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
@@ -150,14 +153,16 @@ fun FilePreviewScreen(
                 type == FileType.PDF && !failed -> PdfViewer(uri, Modifier.fillMaxSize().padding(top = pad), onFail = { failed = true })
                 (type == FileType.TEXT || type == FileType.CODE) && !failed -> TextViewer(uri, Modifier.fillMaxSize().padding(top = pad), lineNumbers = type == FileType.CODE)
                 type == FileType.ARCHIVE -> if (!failed && ArchiveSession.kindOf(current.name) != null) ArchiveViewer(current, uri, Modifier.fillMaxSize().padding(top = pad), onFail = { failed = true }) else OpenWithView(current, "This archive format needs another app.", { openExternal(context, current) }, { share(context, current) }, Modifier.fillMaxSize().padding(top = pad))
+                hexMode -> HexViewer(uri, Modifier.fillMaxSize().padding(top = pad))
                 else -> OpenWithView(
                     current,
                     when (type) { FileType.ARCHIVE -> "VolumeX opens zip, 7z, tar, gz, bz2, xz and rar archives."; FileType.DOCUMENT -> "Open this document in an app that supports it."; else -> "VolumeX has no built-in viewer for this file type." },
-                    { openExternal(context, current) }, { share(context, current) }, Modifier.fillMaxSize().padding(top = pad)
+                    { openExternal(context, current) }, { share(context, current) }, Modifier.fillMaxSize().padding(top = pad), onHex = { hexMode = true }
                 )
             }
         }
 
+        if (showMediaInfo) MediaInfoSheet(uri = uriOf(current), name = current.name) { showMediaInfo = false }
         if (showExif) ExifSheet(uri = uriOf(current), name = current.name) { showExif = false }
 
         if (confirmDelete) {

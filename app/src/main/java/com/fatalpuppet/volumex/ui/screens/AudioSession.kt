@@ -49,8 +49,7 @@ object AudioSession {
 
     fun play(ctx: Context, entry: FileSystemEntry, files: List<FileSystemEntry>) {
         if (currentPath == entry.path) { state?.toggle(); return }
-        val st = state ?: PlayerState(ExoPlayer.Builder(ctx.applicationContext).build().apply {
-            setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+        val st = state ?: PlayerState(newDrivePlayer(ctx).apply {
             pauseAtEndOfMediaItems = true   // a finished track stops; it never rolls on into the next file
         }).also { state = it; detach = it.attach { id -> if (id != null) currentPath = id } }
         val list = files.ifEmpty { listOf(entry) }

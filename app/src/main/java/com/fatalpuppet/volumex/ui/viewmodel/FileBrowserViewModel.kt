@@ -58,6 +58,16 @@ class FileBrowserViewModel : ViewModel() {
     /** One-shot user-facing message (errors / confirmations) shown as a snackbar. */
     val message: StateFlow<String?> = _message.asStateFlow()
     fun consumeMessage() { _message.value = null }
+
+    private var appCtx: Context? = null
+    fun attach(ctx: Context) { appCtx = ctx.applicationContext }
+
+    /** Runs a long copy on IO under the foreground transfer service so it survives the screen turning off. */
+    private fun launchTransfer(ctx: Context?, block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) = viewModelScope.launch(Dispatchers.IO) {
+        val c = ctx ?: appCtx
+        c?.let { com.fatalpuppet.volumex.services.TransferService.begin(it) }
+        try { block() } finally { c?.let { com.fatalpuppet.volumex.services.TransferService.end(it) } }
+    }
     private fun say(text: String) { Log.w(TAG, "UI message: $text"); _message.value = text }
 
     private val _clipboard = MutableStateFlow<Clipboard?>(null)
@@ -250,8 +260,8 @@ class FileBrowserViewModel : ViewModel() {
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val dest = currentPath
         Log.i(TAG, "importUris: ${uris.size} file(s) into '$dest'")
-        viewModelScope.launch(Dispatchers.IO) {
-            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launch }
+        launchTransfer(context) {
+            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launchTransfer }
             val resolver = context.contentResolver
             val progresses = mutableListOf<TransferProgress>()
             val infos = uris.map { u ->
@@ -334,7 +344,7 @@ class FileBrowserViewModel : ViewModel() {
         val r = reader ?: return
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val dest = currentPath
-        viewModelScope.launch(Dispatchers.IO) {
+        launchTransfer(null) {
             val progresses = mutableListOf<TransferProgress>()
             _transferProgress.value = emptyList()
             var failed = 0
@@ -362,7 +372,7 @@ class FileBrowserViewModel : ViewModel() {
                 return ok
             }
             val dstParent = resolveDirEntry(dest)
-            if (dstParent == null) { say("Could not open the destination folder"); return@launch }
+            if (dstParent == null) { say("Could not open the destination folder"); return@launchTransfer }
             for (e in clip.entries) {
                 val ok = try { copyEntry(e, dstParent, dest, null) } catch (x: Exception) { Log.e(TAG, "paste failed", x); false }
                 if (!ok) failed++
@@ -379,7 +389,7 @@ class FileBrowserViewModel : ViewModel() {
         val w = ActiveDriveSession.writer ?: run { say("This drive is mounted read-only"); return }
         val r = reader ?: return
         val dest = currentPath
-        viewModelScope.launch(Dispatchers.IO) {
+        launchTransfer(context) {
             val resolver = context.contentResolver
             val progresses = mutableListOf<TransferProgress>(); _transferProgress.value = emptyList()
             var failed = 0
@@ -408,7 +418,7 @@ class FileBrowserViewModel : ViewModel() {
                     if (!ok) failed++
                 }
             }
-            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launch }
+            val parent = resolveDirEntry(dest) ?: run { say("Could not open the destination folder"); return@launchTransfer }
             val rootDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
             var rootName = "Folder"
             resolver.query(rootDoc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) rootName = it.getString(0) ?: rootName }
@@ -423,7 +433,7 @@ class FileBrowserViewModel : ViewModel() {
     /** Copy files/folders to Downloads/VolumeX (no picker needed). */
     fun copyToDownloads(context: Context, items: List<FileSystemEntry>) {
         val r = reader ?: return
-        viewModelScope.launch(Dispatchers.IO) {
+        launchTransfer(context) {
             val base = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "VolumeX")
             val progresses = mutableListOf<TransferProgress>()
             _transferProgress.value = emptyList()
@@ -466,7 +476,7 @@ class FileBrowserViewModel : ViewModel() {
     fun copyToTree(context: Context, treeUri: Uri, items: List<FileSystemEntry>) {
         val r = reader ?: return
         val resolver = context.contentResolver
-        viewModelScope.launch(Dispatchers.IO) {
+        launchTransfer(context) {
             val rootDoc = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
             val progresses = mutableListOf<TransferProgress>()
             _transferProgress.value = emptyList()

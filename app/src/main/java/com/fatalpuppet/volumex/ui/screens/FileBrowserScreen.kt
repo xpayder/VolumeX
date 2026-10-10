@@ -88,6 +88,8 @@ fun FileBrowserScreen(
     var renameTarget by remember { mutableStateOf<FileSystemEntry?>(null) }
     var deleteTargets by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
     var propertiesOf by remember { mutableStateOf<FileSystemEntry?>(null) }
+    var checksumOf by remember { mutableStateOf<FileSystemEntry?>(null) }
+    var infoOf by remember { mutableStateOf<FileSystemEntry?>(null) }
     var pendingCopy by remember { mutableStateOf<List<FileSystemEntry>>(emptyList()) }
     var askDest by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
@@ -96,6 +98,7 @@ fun FileBrowserScreen(
     val title = if (breadcrumbs.size > 1) breadcrumbs.last().name else driveName
     val visible = entries.filter { showHidden || !it.name.startsWith(".") }
 
+    LaunchedEffect(Unit) { viewModel.attach(context) }
     LaunchedEffect(message) { message?.let { snackbarHost.showSnackbar(it); viewModel.consumeMessage() } }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) viewModel.importUris(context, uris) }
@@ -268,6 +271,11 @@ fun FileBrowserScreen(
             )
         }
         propertiesOf?.let { e -> PropertiesDialog(e, driveName) { propertiesOf = null } }
+        checksumOf?.let { e -> ChecksumDialog(e) { checksumOf = null } }
+        infoOf?.let { e ->
+            val u = DriveFileProvider.buildUri(e.inodeOid, e.path)
+            if (e.fileType == FileType.IMAGE) ExifSheet(u, e.name) { infoOf = null } else MediaInfoSheet(u, e.name) { infoOf = null }
+        }
 
         // ── bottom sheet with the file actions ───────────────────────────────
         sheetEntry?.let { e ->
@@ -297,6 +305,8 @@ fun FileBrowserScreen(
                             context.startActivity(Intent.createChooser(intent, "Share"))
                         }
                     }
+                    if (e.fileType == FileType.AUDIO || e.fileType == FileType.VIDEO || e.fileType == FileType.IMAGE) SheetRow(Icons.Default.Info, "Info…") { sheetEntry = null; infoOf = e }
+                    if (!e.isDirectory) SheetRow(Icons.Default.Tag, "Checksum…") { sheetEntry = null; checksumOf = e }
                     SheetRow(Icons.Default.Download, "Save to…") { sheetEntry = null; askDestination(listOf(e)) }
                     SheetRow(Icons.Default.Info, "Properties") { sheetEntry = null; propertiesOf = e }
                     if (writable) {
@@ -349,8 +359,8 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boole
         ) {
             if (entry.fileType == FileType.VIDEO) {
                 VideoThumb(entry, Modifier.fillMaxSize())
-            } else if (entry.isRaw) {
-                RawImage(DriveFileProvider.buildUri(entry.inodeOid, entry.path), thumb = true, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else if (entry.isRaw || entry.isPsd) {
+                RawImage(DriveFileProvider.buildUri(entry.inodeOid, entry.path), thumb = true, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, psd = entry.isPsd)
             } else if (entry.fileType == FileType.IMAGE) {
                 AsyncImage(
                     model = ImageRequest.Builder(context).data(DriveFileProvider.buildUri(entry.inodeOid, entry.path)).size(360).crossfade(true).build(),

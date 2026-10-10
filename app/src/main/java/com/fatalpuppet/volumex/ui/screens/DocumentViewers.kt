@@ -143,7 +143,7 @@ fun PdfViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
 
 /** Card for formats VolumeX can't render itself (office documents, rar/7z/dmg, unknown types): hand them to another app. */
 @Composable
-fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier) {
+fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier, onHex: (() -> Unit)? = null) {
     Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Box(Modifier.size(88.dp).clip(RoundedCornerShape(26.dp)).background(Color(0x1FFFFFFF)).border(1.dp, GlassBorderFaint, RoundedCornerShape(26.dp)), contentAlignment = Alignment.Center) {
             Icon(Icons.Default.InsertDriveFile, null, tint = AccentBlue, modifier = Modifier.size(42.dp))
@@ -161,5 +161,6 @@ fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onSh
         OutlinedButton(onClick = onShare, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
             Icon(Icons.Default.Share, null, tint = TextPrimary); Spacer(Modifier.width(8.dp)); Text("Share", color = TextPrimary)
         }
+        if (onHex != null) TextButton(onClick = onHex) { Text("View as hex", color = AccentBlue) }
     }
 }

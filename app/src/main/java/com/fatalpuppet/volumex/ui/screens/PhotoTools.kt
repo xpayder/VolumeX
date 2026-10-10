@@ -82,8 +82,12 @@ object RawPreview {
     }
 
     /** [thumb] = the small embedded thumbnail (grid tiles); otherwise the large preview. */
-    suspend fun load(ctx: Context, uri: Uri, thumb: Boolean): Bitmap? = withContext(Dispatchers.IO) {
-        val key = "$uri#$thumb"
+    suspend fun load(ctx: Context, uri: Uri, thumb: Boolean, psd: Boolean = false): Bitmap? = withContext(Dispatchers.IO) {
+        val key = "$uri#$thumb#$psd"
+        if (psd) {
+            cache.get(key)?.let { return@withContext it }
+            return@withContext try { PsdPreview.load(ctx, uri, if (thumb) 512 else 3072)?.also { cache.put(key, it) } } catch (_: Throwable) { null }
+        }
         cache.get(key)?.let { return@withContext it }
         try {
             val orientation = ctx.contentResolver.openFileDescriptor(uri, "r")?.use { ExifInterface(it.fileDescriptor).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } ?: ExifInterface.ORIENTATION_NORMAL
@@ -107,9 +111,9 @@ object RawPreview {
 
 /** A RAW photo (shown through its embedded preview). */
 @Composable
-fun RawImage(uri: Uri, thumb: Boolean, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Fit) {
+fun RawImage(uri: Uri, thumb: Boolean, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Fit, psd: Boolean = false) {
     val ctx = LocalContext.current
-    val bmp by produceState<Bitmap?>(null, uri, thumb) { value = RawPreview.load(ctx, uri, thumb) }
+    val bmp by produceState<Bitmap?>(null, uri, thumb, psd) { value = RawPreview.load(ctx, uri, thumb, psd) }
     val b = bmp
     if (b != null) Image(b.asImageBitmap(), null, modifier, contentScale = contentScale)
     else Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)) }
