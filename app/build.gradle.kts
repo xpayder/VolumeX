@@ -15,6 +15,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // libVLC ships native libraries for every ABI (80 MB); phones that matter here are arm64
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
@@ -59,6 +61,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("org.videolan.android:libvlc-all:3.7.7")
     implementation("androidx.exifinterface:exifinterface:1.4.1")
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")

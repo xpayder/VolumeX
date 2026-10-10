@@ -58,7 +58,7 @@ data class FileSystemEntry(
         /** Camera RAW formats Android cannot decode itself; the embedded JPEG preview is shown instead (DNG decodes natively). */
         val RAW_EXT = setOf("cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "orf", "rw2", "raf", "pef", "srw", "rwl", "3fr", "erf", "kdc", "mrw", "dcr", "raw", "x3f", "iiq", "mef", "mos")
         val IMAGE_EXT = setOf("jpg", "jpeg", "jpe", "png", "gif", "webp", "heic", "heif", "bmp", "svg", "avif", "dng", "ico", "wbmp", "jfif", "psd") + RAW_EXT
-        val VIDEO_EXT = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "3g2", "mts", "m2ts", "mpg", "mpeg", "ogv", "flv", "wmv", "asf", "vob", "divx")
+        val VIDEO_EXT = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "3g2", "mts", "m2ts", "mpg", "mpeg", "ogv", "flv", "wmv", "asf", "vob", "divx", "mxf", "dv", "m2v", "rm", "rmvb", "f4v", "mod")
         val AUDIO_EXT = setOf("mp3", "aac", "flac", "wav", "m4a", "ogg", "oga", "opus", "wma", "mka", "mid", "midi", "amr", "aif", "aiff", "ac3", "weba", "m4b", "caf")
         val TEXT_EXT = setOf("txt", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "conf", "cfg", "properties", "html", "htm", "css", "srt", "vtt", "nfo", "tex", "plist", "gitignore", "env")
         val DOC_EXT = setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "pages", "numbers", "key", "epub", "mobi")

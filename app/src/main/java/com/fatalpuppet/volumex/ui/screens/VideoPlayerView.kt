@@ -51,9 +51,9 @@ internal fun fmt(ms: Long): String {
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
 }
 
-/** ExoPlayer plus the bits of its state the UI needs, as Compose state. */
+/** What the transport controls need from any player engine (ExoPlayer, or libVLC for formats the phone cannot decode). */
 @Stable
-class PlayerState(val player: ExoPlayer) {
+abstract class TransportState {
     var playing by mutableStateOf(false)
     var buffering by mutableStateOf(true)
     var ended by mutableStateOf(false)
@@ -62,29 +62,50 @@ class PlayerState(val player: ExoPlayer) {
     var aspect by mutableFloatStateOf(16f / 9f)
     var error by mutableStateOf<String?>(null)
     var speed by mutableFloatStateOf(1f)
+    abstract fun toggle()
+    abstract fun seekTo(ms: Long)
+    abstract fun changeSpeed(s: Float)
+    fun seekBy(d: Long) = seekTo(position + d)
+}
 
-    fun toggle() { if (ended) { player.seekTo(0); ended = false }; if (player.isPlaying) player.pause() else player.play() }
-    fun seekTo(ms: Long) { player.seekTo(ms.coerceIn(0, duration.coerceAtLeast(0))); position = ms }
-    fun seekBy(d: Long) = seekTo(player.currentPosition + d)
-    fun changeSpeed(s: Float) { speed = s; player.setPlaybackSpeed(s) }
+/** ExoPlayer plus the bits of its state the UI needs, as Compose state. */
+@Stable
+class PlayerState(val player: ExoPlayer) : TransportState() {
+    /** Set when ExoPlayer cannot decode this file's video (no hardware decoder): the caller switches to the software player. */
+    var needsSoftwareDecoder by mutableStateOf(false)
+    override fun toggle() { if (ended) { player.seekTo(0); ended = false }; if (player.isPlaying) player.pause() else player.play() }
+    override fun seekTo(ms: Long) { player.seekTo(ms.coerceIn(0, duration.coerceAtLeast(0))); position = ms }
+    override fun changeSpeed(s: Float) { speed = s; player.setPlaybackSpeed(s) }
 }
 
 /** Mirrors the ExoPlayer's state into this holder; returns a function that detaches the listener. */
-fun PlayerState.attach(onTransition: ((String?) -> Unit)? = null): () -> Unit {
+fun PlayerState.attach(videoExpected: Boolean = false, onTransition: ((String?) -> Unit)? = null): () -> Unit {
     val st = this
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    // a file that should have a picture but ExoPlayer ended up with no video track (e.g. FFV1 in MKV): use the software player
+    val checkVideo = Runnable { if (videoExpected && st.player.videoFormat == null && st.player.playbackState != Player.STATE_IDLE) st.needsSoftwareDecoder = true }
     val l = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) { st.playing = isPlaying }
         override fun onPlaybackStateChanged(s: Int) {
             st.buffering = s == Player.STATE_BUFFERING
             st.ended = s == Player.STATE_ENDED
             if (s == Player.STATE_READY) st.duration = st.player.duration.coerceAtLeast(0)
+            // the container opened but ExoPlayer found nothing it can play in it (unknown video codec, e.g. ProRes / DNxHD): hand over
+            if ((s == Player.STATE_READY || s == Player.STATE_ENDED) && st.player.currentTracks.groups.isEmpty()) st.needsSoftwareDecoder = true
+            if (s == Player.STATE_ENDED) checkVideo.run() else if (s == Player.STATE_READY) handler.postDelayed(checkVideo, 1200)
         }
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) { st.duration = 0; st.position = 0; onTransition?.invoke(item?.mediaId) }
         override fun onVideoSizeChanged(v: VideoSize) { if (v.width > 0 && v.height > 0) st.aspect = v.width * v.pixelWidthHeightRatio / v.height }
-        override fun onPlayerError(e: PlaybackException) { st.error = "This format can't be played inside VolumeX" }
+        override fun onPlayerError(e: PlaybackException) {
+            st.error = "This format can't be played inside VolumeX"; st.needsSoftwareDecoder = true }
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            // a video track exists but no decoder on this phone can play it: playback would be audio over a black picture
+            val videoGroups = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }
+            if (videoGroups.isNotEmpty() && videoGroups.none { it.isSelected }) st.needsSoftwareDecoder = true
+        }
     }
     player.addListener(l)
-    return { player.removeListener(l) }
+    return { handler.removeCallbacks(checkVideo); player.removeListener(l) }
 }
 
 @Composable
@@ -95,7 +116,8 @@ fun rememberPlayerState(uri: Uri): PlayerState {
         PlayerState(p)
     }
     DisposableEffect(state) {
-        val detach = state.attach()
+        val ext = uri.getQueryParameter("path")?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        val detach = state.attach(videoExpected = ext in com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry.VIDEO_EXT)
         onDispose { detach(); state.player.release() }
     }
     LaunchedEffect(state) { while (isActive) { state.position = state.player.currentPosition; delay(250) } }
@@ -104,8 +126,8 @@ fun rememberPlayerState(uri: Uri): PlayerState {
 
 /** Floating control panel shared by the video and audio players. */
 @Composable
-private fun TransportControls(
-    s: PlayerState, dragging: Boolean, onDrag: (Boolean) -> Unit, onPrev: (() -> Unit)?, onNext: (() -> Unit)?,
+internal fun TransportControls(
+    s: TransportState, dragging: Boolean, onDrag: (Boolean) -> Unit, onPrev: (() -> Unit)?, onNext: (() -> Unit)?,
     modifier: Modifier = Modifier, compact: Boolean = false, onFullscreen: (() -> Unit)? = null, fullscreen: Boolean = false, onInteract: () -> Unit = {}
 ) {
     var speedMenu by remember { mutableStateOf(false) }
@@ -155,7 +177,10 @@ private fun TransportControls(
     }
 }
 
-/** Video player (ExoPlayer: mp4, mkv, webm, mov, 3gp, ts, ogv…) with pinch / double-tap zoom, seek bar and speed. */
+/**
+ * Video player. ExoPlayer first (hardware decoders: mp4, mkv, webm, mov, 3gp, ts…); when this phone has no decoder for the
+ * file (ProRes, DNxHD / MXF, FFV1, WMV, FLV, DivX…) it switches by itself to the libVLC software player.
+ */
 @Composable
 fun VideoPlayerView(
     uri: Uri,
@@ -166,7 +191,24 @@ fun VideoPlayerView(
     onOpenExternal: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var software by remember(uri) { mutableStateOf(false) }
+    if (software) VlcVideoPlayerView(uri, onPrev, onNext, onFullscreen, fullscreen, onOpenExternal, modifier)
+    else ExoVideoPlayerView(uri, onPrev, onNext, onFullscreen, fullscreen, onOpenExternal, modifier) { software = true }
+}
+
+@Composable
+private fun ExoVideoPlayerView(
+    uri: Uri,
+    onPrev: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    onFullscreen: (() -> Unit)?,
+    fullscreen: Boolean,
+    onOpenExternal: (() -> Unit)?,
+    modifier: Modifier,
+    onNeedSoftware: () -> Unit
+) {
     val s = rememberPlayerState(uri)
+    LaunchedEffect(s.needsSoftwareDecoder) { if (s.needsSoftwareDecoder) onNeedSoftware() }
     var controls by remember(uri) { mutableStateOf(true) }
     var dragging by remember(uri) { mutableStateOf(false) }
     var touch by remember(uri) { mutableIntStateOf(0) }

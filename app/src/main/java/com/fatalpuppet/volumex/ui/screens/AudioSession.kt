@@ -51,7 +51,7 @@ object AudioSession {
         if (currentPath == entry.path) { state?.toggle(); return }
         val st = state ?: PlayerState(newDrivePlayer(ctx).apply {
             pauseAtEndOfMediaItems = true   // a finished track stops; it never rolls on into the next file
-        }).also { state = it; detach = it.attach { id -> if (id != null) currentPath = id } }
+        }).also { state = it; detach = it.attach(false) { id -> if (id != null) currentPath = id } }
         val list = files.ifEmpty { listOf(entry) }
         queue = list
         val idx = list.indexOfFirst { it.path == entry.path }.coerceAtLeast(0)
