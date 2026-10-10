@@ -155,7 +155,7 @@ fun ArchiveViewer(entry: FileSystemEntry, uri: Uri, modifier: Modifier = Modifie
     if (list == null) {
         Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             val frac = if (entry.size > 0) (copied.toFloat() / entry.size).coerceIn(0f, 1f) else 0f
-            LinearProgressIndicator(progress = { frac }, color = AccentBlue, trackColor = GlassWhite12, modifier = Modifier.width(180.dp))
+            LinearProgressIndicator(progress = { frac }, color = Accent, trackColor = GlassWhite12, modifier = Modifier.width(180.dp))
             Spacer(Modifier.height(10.dp))
             Text("Reading archive from the drive…", color = TextTertiary, fontSize = 12.sp)
         }
@@ -166,7 +166,7 @@ fun ArchiveViewer(entry: FileSystemEntry, uri: Uri, modifier: Modifier = Modifie
             Text("${list.count { !it.isDir }} files", color = TextTertiary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
             Button(
                 onClick = { extract(list) }, enabled = !busy && list.isNotEmpty(), shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 if (busy) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(16.dp)) else Icon(Icons.Default.Unarchive, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp)); Text("Extract all", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
@@ -179,7 +179,7 @@ fun ArchiveViewer(entry: FileSystemEntry, uri: Uri, modifier: Modifier = Modifie
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(enabled = !it.isDir && !busy) { extract(listOf(it)) }.padding(horizontal = 10.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(if (it.isDir) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = if (it.isDir) AccentBlue else TextTertiary, modifier = Modifier.size(20.dp))
+                    Icon(if (it.isDir) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = if (it.isDir) Accent else TextTertiary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
                     Text(it.path, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (it.size >= 0 && !it.isDir) Text(FileSystemEntry.formatBytes(it.size), color = TextTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)

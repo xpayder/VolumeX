@@ -140,7 +140,7 @@ internal fun TransportControls(
             onValueChange = { onDrag(true); dragPos = it; onInteract() },
             onValueChangeFinished = { s.seekTo(dragPos.toLong()); onDrag(false) },
             valueRange = 0f..s.duration.coerceAtLeast(1).toFloat(),
-            colors = SliderDefaults.colors(thumbColor = TextPrimary, activeTrackColor = AccentBlue, inactiveTrackColor = Color(0x40FFFFFF))
+            colors = SliderDefaults.colors(thumbColor = TextPrimary, activeTrackColor = Accent, inactiveTrackColor = Color(0x40FFFFFF))
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(fmt(shown.toLong()), color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
@@ -154,16 +154,16 @@ internal fun TransportControls(
                     "${if (s.speed % 1f == 0f) s.speed.toInt().toString() else s.speed.toString()}x", color = TextPrimary, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x1FFFFFFF)).clickable { speedMenu = true; onInteract() }.padding(horizontal = 12.dp, vertical = 8.dp)
                 )
-                DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }, modifier = Modifier.background(DarkCard)) {
+                if (speedMenu) com.fatalpuppet.volumex.ui.components.GlassMenu(onDismissRequest = { speedMenu = false }, alignment = Alignment.BottomStart, edgePadding = 120.dp) {
                     listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
-                        DropdownMenuItem(text = { Text("${sp}x", color = if (sp == s.speed) AccentBlue else TextPrimary) }, onClick = { s.changeSpeed(sp); speedMenu = false })
+                        com.fatalpuppet.volumex.ui.components.GlassMenuItem("${sp}x", tint = if (sp == s.speed) Accent else TextPrimary) { s.changeSpeed(sp); speedMenu = false }
                     }
                 }
             }
             IconButton(onClick = { onPrev?.invoke(); onInteract() }, enabled = onPrev != null) { Icon(Icons.Default.SkipPrevious, "Previous", tint = if (onPrev != null) TextPrimary else TextDisabled) }
             IconButton(onClick = { s.seekBy(-10_000); onInteract() }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = TextPrimary) }
             Box(
-                Modifier.size(big).clip(CircleShape).background(Brush.linearGradient(listOf(AccentBlue, Color(0xFF7AA8FF)))).clickable { s.toggle(); onInteract() },
+                Modifier.size(big).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Color(0xFF7AA8FF)))).clickable { s.toggle(); onInteract() },
                 contentAlignment = Alignment.Center
             ) {
                 if (s.buffering && !s.playing) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.5.dp, modifier = Modifier.size(big * 0.5f))
@@ -234,7 +234,7 @@ private fun ExoVideoPlayerView(
                     }
                 }
             }
-            if (s.buffering && !s.playing) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.align(Alignment.Center))
+            if (s.buffering && !s.playing) CircularProgressIndicator(color = Accent, modifier = Modifier.align(Alignment.Center))
             AnimatedVisibility(
                 visible = controls || !s.playing, modifier = Modifier.align(Alignment.BottomCenter),
                 enter = fadeIn() + slideInVertically { it / 3 }, exit = fadeOut() + slideOutVertically { it / 3 }
@@ -275,7 +275,7 @@ fun AudioPlayerCard(uri: Uri, name: String, sizeText: String, onPrev: (() -> Uni
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(76.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(AccentPurple.copy(0.55f), AccentBlue.copy(0.45f)))),
+                Modifier.size(76.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(AccentSky.copy(0.55f), Accent.copy(0.45f)))),
                 contentAlignment = Alignment.Center
             ) {
                 val a = art

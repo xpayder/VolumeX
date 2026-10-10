@@ -44,10 +44,10 @@ fun FileListItem(
     onLongClick: () -> Unit = {}
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) GlassWhite16 else if (highlight) AccentBlue.copy(alpha = 0.09f) else Color.Transparent,
+        targetValue = if (isSelected) GlassWhite16 else if (highlight) Accent.copy(alpha = 0.09f) else Color.Transparent,
         label = "bgColor"
     )
-    val borderColor = if (isSelected) AccentBlue else if (highlight) AccentBlue.copy(alpha = 0.28f) else Color.Transparent
+    val borderColor = if (isSelected) Accent else if (highlight) Accent.copy(alpha = 0.28f) else Color.Transparent
 
     Column(
         modifier = Modifier
@@ -69,7 +69,7 @@ fun FileListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = entry.name,
-                    color = if (highlight) AccentBlue else TextPrimary,
+                    color = if (highlight) Accent else TextPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -117,14 +117,14 @@ private fun FileIconBox(entry: FileSystemEntry) {
 }
 
 private fun getFileIconAndColor(entry: FileSystemEntry): Pair<ImageVector, Color> = when (entry.fileType) {
-    FileType.DIRECTORY -> Pair(Icons.Default.Folder, AccentBlue)
-    FileType.IMAGE -> Pair(Icons.Default.Image, AccentPurple)
+    FileType.DIRECTORY -> Pair(Icons.Default.Folder, Accent)
+    FileType.IMAGE -> Pair(Icons.Default.Image, AccentSky)
     FileType.VIDEO -> Pair(Icons.Default.VideoFile, AccentOrange)
     FileType.AUDIO -> Pair(Icons.Default.AudioFile, AccentGreen)
     FileType.PDF -> Pair(Icons.Default.PictureAsPdf, AccentRed)
     FileType.ARCHIVE -> Pair(if (entry.extension in setOf("dmg", "pkg", "app")) Icons.Default.Apps else Icons.Default.FolderZip, AccentOrange)
     FileType.TEXT, FileType.DOCUMENT -> Pair(Icons.Default.Description, TextSecondary)
-    FileType.CODE -> Pair(Icons.Default.Code, AccentBlue)
+    FileType.CODE -> Pair(Icons.Default.Code, Accent)
     else -> Pair(Icons.Default.InsertDriveFile, TextTertiary)
 }
 

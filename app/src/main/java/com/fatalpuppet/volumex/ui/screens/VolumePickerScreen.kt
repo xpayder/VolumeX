@@ -29,29 +29,9 @@ fun VolumePickerScreen(
     onSelectVolume: (VolumeInfo, Int) -> Unit,
     onNavigateBack: () -> Unit = {}
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(DeepNavy, DarkNavy, NavyMid)))
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(GlassWhite8)
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Select Volume", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text(deviceName, color = TextTertiary, fontSize = 12.sp)
-                }
-            }
+            com.fatalpuppet.volumex.ui.components.GlassTopBar(title = "Select Volume", subtitle = deviceName, onBack = onNavigateBack)
 
             Spacer(Modifier.height(8.dp))
 
@@ -80,9 +60,8 @@ private fun VolumeCard(vol: VolumeInfo, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(GlassWhite8)
-            .border(1.dp, GlassBorderFaint, RoundedCornerShape(14.dp))
+            .glassOrSolid(RoundedCornerShape(20.dp), GlassLevel.Card)
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -91,13 +70,13 @@ private fun VolumeCard(vol: VolumeInfo, onClick: () -> Unit) {
             modifier = Modifier
                 .size(44.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Brush.verticalGradient(listOf(AccentBlue.copy(alpha = 0.3f), AccentPurple.copy(alpha = 0.2f)))),
+                .background(Brush.verticalGradient(listOf(Accent.copy(alpha = 0.3f), AccentSky.copy(alpha = 0.2f)))),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (vol.isEncrypted) Icons.Default.Lock else Icons.Default.Storage,
                 contentDescription = null,
-                tint = if (vol.isEncrypted) AccentOrange else AccentBlue,
+                tint = if (vol.isEncrypted) AccentOrange else Accent,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -132,7 +111,7 @@ private fun VolumeCard(vol: VolumeInfo, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TypeBadge(label: String, tint: androidx.compose.ui.graphics.Color = AccentBlue) {
+private fun TypeBadge(label: String, tint: androidx.compose.ui.graphics.Color = Accent) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))

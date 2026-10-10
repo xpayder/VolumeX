@@ -82,7 +82,7 @@ fun Modifier.glassCardBackground(
 
 /** Accent glow border for selected/active states. */
 fun Modifier.glowBorder(
-    color: Color = AccentBlue,
+    color: Color = Accent,
     shape: RoundedCornerShape = GlassEffect.DefaultShape,
     width: Dp = 1.5.dp
 ): Modifier = this.border(width, color, shape)
@@ -94,7 +94,7 @@ fun Modifier.accentGradient(
     .clip(shape)
     .background(
         brush = Brush.linearGradient(
-            colors = listOf(AccentBlue, AccentPurple),
+            colors = listOf(Accent, AccentSky),
             start = Offset(0f, 0f),
             end = Offset(Float.POSITIVE_INFINITY, 0f)
         )

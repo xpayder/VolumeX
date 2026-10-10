@@ -45,7 +45,7 @@ fun DeviceVolumeCard(
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             Brush.verticalGradient(
-                                listOf(AccentBlue.copy(alpha = 0.3f), AccentPurple.copy(alpha = 0.15f))
+                                listOf(Accent.copy(alpha = 0.3f), AccentSky.copy(alpha = 0.15f))
                             )
                         ),
                     contentAlignment = Alignment.Center
@@ -53,7 +53,7 @@ fun DeviceVolumeCard(
                     Icon(
                         imageVector = Icons.Default.Storage,
                         contentDescription = null,
-                        tint = AccentBlue,
+                        tint = Accent,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -80,7 +80,7 @@ fun DeviceVolumeCard(
                     Icon(
                         imageVector = Icons.Default.ArrowForwardIos,
                         contentDescription = "Browse",
-                        tint = AccentBlue,
+                        tint = Accent,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -124,10 +124,10 @@ private fun VolumeTypeBadge(type: String) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(AccentBlue.copy(alpha = 0.15f))
+            .background(Accent.copy(alpha = 0.15f))
             .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
-        Text(text = type, color = AccentBlue, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(text = type, color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -175,7 +175,7 @@ private fun StorageBar(usedFraction: Float) {
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(2.dp))
                     .background(
-                        Brush.horizontalGradient(listOf(AccentBlue, AccentPurple))
+                        Brush.horizontalGradient(listOf(Accent, AccentSky))
                     )
             )
         }

@@ -1,5 +1,9 @@
 package com.fatalpuppet.volumex.ui.screens
 
+import com.fatalpuppet.volumex.ui.components.GlassDialog
+import com.fatalpuppet.volumex.ui.components.GlassSheet
+import com.fatalpuppet.volumex.ui.components.GlassMenu
+import com.fatalpuppet.volumex.ui.components.GlassMenuItem
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
@@ -102,7 +106,7 @@ fun FilePreviewScreen(
             add(SvgDecoder.Factory())
         }.build()
     }
-    val hazeState = rememberHazeState()
+    val hazeState = LocalHaze.current ?: rememberHazeState()
     var headerPx by remember { mutableIntStateOf(0) }
     val headerDp = with(LocalDensity.current) { headerPx.toDp() }
     val type = current.fileType
@@ -166,13 +170,12 @@ fun FilePreviewScreen(
         if (showExif) ExifSheet(uri = uriOf(current), name = current.name) { showExif = false }
 
         if (confirmDelete) {
-            AlertDialog(
+            GlassDialog(
                 onDismissRequest = { confirmDelete = false },
                 title = { Text("Delete \"${current.name}\"?", color = TextPrimary) },
                 text = { Text("This permanently removes it from the drive.", color = TextSecondary) },
                 confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete(current); onNavigateBack() }) { Text("Delete", color = AccentRed) } },
-                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = TextTertiary) } },
-                containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = TextTertiary) } }
             )
         }
     }

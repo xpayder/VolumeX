@@ -19,10 +19,10 @@ val GlassBorder       = Color(0x26FFFFFF)   // 20% white for borders
 val GlassBorderFaint  = Color(0x14FFFFFF)   // 10% white for subtle borders
 
 // Accent colors
-val AccentBlue        = Color(0xFF4C9AFF)
-val AccentBlueDim     = Color(0xFF2F6FBF)
-val AccentPurple      = Color(0xFFBF5AF2)
-val AccentPurpleDim   = Color(0xFF9B44D0)
+val Accent            = Color(0xFF5BE3C0)   // FeldKit mint, same as the icon LED
+val AccentDim         = Color(0xFF2FA88C)
+val AccentSky         = Color(0xFF4DA8E8)
+val AccentSkyDim      = Color(0xFF2F7DB8)
 val AccentCyan        = Color(0xFF32D74B).copy(alpha = 0.85f)
 val AccentGreen       = Color(0xFF32D74B)
 val AccentOrange      = Color(0xFFFF9F0A)
@@ -43,4 +43,4 @@ val GradientPurpleEnd   = Color(0xFF7E3CC8)
 // Light theme overrides (minimal — app is dark-first)
 val LightBackground = Color(0xFFF2F4F8)
 val LightSurface    = Color(0xFFFFFFFF)
-val LightPrimary    = Color(0xFF0A84FF)
+val LightPrimary    = Color(0xFF2FA88C)

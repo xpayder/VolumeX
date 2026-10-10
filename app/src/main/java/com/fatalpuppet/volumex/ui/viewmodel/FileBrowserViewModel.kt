@@ -313,7 +313,7 @@ class FileBrowserViewModel : ViewModel() {
                     updateProgress(progresses, idx, TransferProgress(name, 0, size0.coerceAtLeast(0), isComplete = true, error = e.message ?: "Error"))
                 }
             }
-            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "VolumeX-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
+            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "FeldKit-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
     }
@@ -465,7 +465,7 @@ class FileBrowserViewModel : ViewModel() {
             var rootName = "Folder"
             resolver.query(rootDoc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) rootName = it.getString(0) ?: rootName }
             upload(rootDoc, rootName, DocumentsContract.Document.MIME_TYPE_DIR, 0, parent, dest)
-            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "VolumeX-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
+            if (cv.manifest && manifest.isNotEmpty()) try { w.writeFile(parent, "FeldKit-${stamp()}.sha256", manifestText(manifest).toByteArray()) } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             say(if (failed == 0) "Folder uploaded" else "$failed item(s) failed")
             withContext(Dispatchers.Main) { loadDirectory(currentPath) }
         }
@@ -473,12 +473,12 @@ class FileBrowserViewModel : ViewModel() {
 
     // ── Copy from the drive to a folder the user picks (Storage Access Framework) ──
 
-    /** Copy files/folders to Downloads/VolumeX (no picker needed). */
+    /** Copy files/folders to Downloads/FeldKit (no picker needed). */
     fun copyToDownloads(context: Context, items: List<FileSystemEntry>) {
         val r = reader ?: return
         val cv = copyCfg(context)
         launchTransfer(context) {
-            val base = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "VolumeX")
+            val base = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "FeldKit")
             val progresses = mutableListOf<TransferProgress>()
             val manifest = ArrayList<Pair<String, String>>()
             _transferProgress.value = emptyList()
@@ -527,9 +527,9 @@ class FileBrowserViewModel : ViewModel() {
                 }
             }
             items.forEach { copyOne(it, base) }
-            if (cv.manifest && manifest.isNotEmpty()) java.io.File(base, "VolumeX-${stamp()}.sha256").writeText(manifestText(manifest))
+            if (cv.manifest && manifest.isNotEmpty()) java.io.File(base, "FeldKit-${stamp()}.sha256").writeText(manifestText(manifest))
             val bad = progresses.count { it.error != null }
-            say(if (bad == 0) (if (cv.verify) "Saved and verified in Downloads/VolumeX" else "Saved to Downloads/VolumeX") else "$bad file(s) failed - see the transfer list")
+            say(if (bad == 0) (if (cv.verify) "Saved and verified in Downloads/FeldKit" else "Saved to Downloads/FeldKit") else "$bad file(s) failed - see the transfer list")
             _selectedEntries.value = emptySet()
         }
     }
@@ -622,7 +622,7 @@ class FileBrowserViewModel : ViewModel() {
             }
             items.forEach { copyOne(it, rootDoc, "") }
             if (cv.manifest && manifest.isNotEmpty()) try {
-                DocumentsContract.createDocument(resolver, rootDoc, "text/plain", "VolumeX-${stamp()}.sha256")?.let { d -> resolver.openOutputStream(d)?.use { it.write(manifestText(manifest).toByteArray()) } }
+                DocumentsContract.createDocument(resolver, rootDoc, "text/plain", "FeldKit-${stamp()}.sha256")?.let { d -> resolver.openOutputStream(d)?.use { it.write(manifestText(manifest).toByteArray()) } }
             } catch (e: Exception) { Log.w(TAG, "manifest not written", e) }
             _selectedEntries.value = emptySet()
         }

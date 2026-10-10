@@ -1,5 +1,9 @@
 package com.fatalpuppet.volumex.ui.screens
 
+import com.fatalpuppet.volumex.ui.components.GlassDialog
+import com.fatalpuppet.volumex.ui.components.GlassSheet
+import com.fatalpuppet.volumex.ui.components.GlassMenu
+import com.fatalpuppet.volumex.ui.components.GlassMenuItem
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -116,7 +120,7 @@ fun RawImage(uri: Uri, thumb: Boolean, modifier: Modifier = Modifier, contentSca
     val bmp by produceState<Bitmap?>(null, uri, thumb, psd) { value = RawPreview.load(ctx, uri, thumb, psd) }
     val b = bmp
     if (b != null) Image(b.asImageBitmap(), null, modifier, contentScale = contentScale)
-    else Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)) }
+    else Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)) }
 }
 
 private class ExifRow(val label: String, val value: String)
@@ -171,16 +175,16 @@ private fun readExif(ctx: Context, uri: Uri): List<ExifGroup> {
 fun ExifSheet(uri: Uri, name: String, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val groups by produceState<List<ExifGroup>?>(null, uri) { value = withContext(Dispatchers.IO) { try { readExif(ctx, uri) } catch (_: Exception) { emptyList() } } }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = DarkSurface, shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), contentColor = TextPrimary) {
+    GlassSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
             Text(name, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Spacer(Modifier.height(14.dp))
             val g = groups
             when {
-                g == null -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.padding(16.dp).size(24.dp))
+                g == null -> CircularProgressIndicator(color = Accent, modifier = Modifier.padding(16.dp).size(24.dp))
                 g.isEmpty() -> Text("This file carries no EXIF data.", color = TextTertiary, fontSize = 14.sp)
                 else -> g.forEach { grp ->
-                    Text(grp.title.uppercase(), color = AccentBlue, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                    Text(grp.title.uppercase(), color = Accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                     grp.rows.forEach { r ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
                             Text(r.label, color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))

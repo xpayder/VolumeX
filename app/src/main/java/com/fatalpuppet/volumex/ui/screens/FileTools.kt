@@ -1,5 +1,9 @@
 package com.fatalpuppet.volumex.ui.screens
 
+import com.fatalpuppet.volumex.ui.components.GlassDialog
+import com.fatalpuppet.volumex.ui.components.GlassSheet
+import com.fatalpuppet.volumex.ui.components.GlassMenu
+import com.fatalpuppet.volumex.ui.components.GlassMenuItem
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -63,7 +67,7 @@ fun ChecksumDialog(entry: FileSystemEntry, onDismiss: () -> Unit) {
             if (!ok) error = "Could not read the file" else result = if (md != null) md.digest().joinToString("") { "%02x".format(it) } else "%08x".format(crc.value)
         }
     }
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
         title = { Text("Checksum", color = TextPrimary) },
         text = {
@@ -73,24 +77,23 @@ fun ChecksumDialog(entry: FileSystemEntry, onDismiss: () -> Unit) {
                     listOf("MD5", "SHA-1", "SHA-256", "CRC32").forEach { a ->
                         Text(
                             a, color = if (a == algo) DeepNavy else TextSecondary, fontSize = 12.sp, fontFamily = Mono,
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (a == algo) AccentBlue else Color0x1F).clickable { algo = a }.padding(horizontal = 10.dp, vertical = 7.dp)
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (a == algo) Accent else Color0x1F).clickable { algo = a }.padding(horizontal = 10.dp, vertical = 7.dp)
                         )
                     }
                 }
                 when {
                     error != null -> Text(error!!, color = AccentRed, fontSize = 13.sp)
-                    result == null -> { LinearProgressIndicator(progress = { progress }, color = AccentBlue, trackColor = GlassWhite12, modifier = Modifier.fillMaxWidth()); Text("${(progress * 100).toInt()}%", color = TextTertiary, fontSize = 11.sp, fontFamily = Mono) }
+                    result == null -> { LinearProgressIndicator(progress = { progress }, color = Accent, trackColor = GlassWhite12, modifier = Modifier.fillMaxWidth()); Text("${(progress * 100).toInt()}%", color = TextTertiary, fontSize = 11.sp, fontFamily = Mono) }
                     else -> {
                         Text(result!!, color = TextPrimary, fontSize = 12.sp, fontFamily = Mono, lineHeight = 17.sp)
                         TextButton(onClick = { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(algo, result)) }, contentPadding = PaddingValues(0.dp)) {
-                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = AccentBlue); Spacer(Modifier.width(6.dp)); Text("Copy", color = AccentBlue)
+                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = Accent); Spacer(Modifier.width(6.dp)); Text("Copy", color = Accent)
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } },
-        containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Accent) } }
     )
 }
 
@@ -200,16 +203,16 @@ private fun readInfo(ctx: Context, uri: Uri): List<InfoGroup> {
 fun MediaInfoSheet(uri: Uri, name: String, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val groups by produceState<List<InfoGroup>?>(null, uri) { value = withContext(Dispatchers.IO) { try { readInfo(ctx, uri) } catch (_: Exception) { emptyList() } } }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = DarkSurface, shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), contentColor = TextPrimary) {
+    GlassSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
             Text(name, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(14.dp))
             val g = groups
             when {
-                g == null -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.padding(16.dp).size(24.dp))
+                g == null -> CircularProgressIndicator(color = Accent, modifier = Modifier.padding(16.dp).size(24.dp))
                 g.isEmpty() -> Text("Android cannot read this file's media information.", color = TextTertiary, fontSize = 14.sp)
                 else -> g.forEach { grp ->
-                    Text(grp.title.uppercase(), color = AccentBlue, fontSize = 11.sp, fontFamily = Mono, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                    Text(grp.title.uppercase(), color = Accent, fontSize = 11.sp, fontFamily = Mono, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                     grp.rows.forEach { r ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
                             Text(r.label, color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))
@@ -240,7 +243,7 @@ fun HexViewer(uri: Uri, modifier: Modifier = Modifier) {
         }
     }
     val d = data
-    if (d == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }; return }
+    if (d == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }; return }
     val rows = (d.size + 7) / 8
     LazyColumn(modifier.padding(horizontal = 10.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
         items(rows) { i ->

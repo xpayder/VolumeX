@@ -33,16 +33,13 @@ fun HomeScreen(
     val deviceState by viewModel.deviceState.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
 
-    val hazeState = dev.chrisbanes.haze.rememberHazeState()
-    androidx.compose.runtime.CompositionLocalProvider(LocalHaze provides hazeState) {
+    run {
     Box(modifier = Modifier.fillMaxSize()) {
-        AmbientBackdrop(hazeState, Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("VolumeX", color = TextTertiary, fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(start = 8.dp).weight(1f))
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TextSecondary) }
-            }
+            com.fatalpuppet.volumex.ui.components.GlassTopBar(
+                title = "FeldKit",
+                actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TextSecondary) } }
+            )
 
             // Content
             AnimatedContent(
@@ -59,7 +56,7 @@ fun HomeScreen(
                     is DeviceState.Connecting -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = AccentBlue)
+                                CircularProgressIndicator(color = Accent)
                                 Spacer(Modifier.height(16.dp))
                                 Text("Connecting...", color = TextSecondary)
                             }
@@ -114,7 +111,7 @@ private fun HomeTopBar(statusMessage: String) {
                     .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(
-                        Brush.verticalGradient(listOf(AccentBlue, AccentPurple))
+                        Brush.verticalGradient(listOf(Accent, AccentSky))
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -130,7 +127,7 @@ private fun HomeTopBar(statusMessage: String) {
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "VolumeX",
+                    text = "FeldKit",
                     color = TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
@@ -223,12 +220,12 @@ private fun EmptyBay(note: String? = null) {
                 drawRoundRect(color = GlassBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(36f * density / 3f * 2.2f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f * density / 2f, pathEffect = dash))
                 val w = size.width * 0.34f; val h = size.height * 0.11f
                 drawRoundRect(
-                    color = AccentBlue, topLeft = androidx.compose.ui.geometry.Offset((size.width - w) / 2, (size.height - h) / 2), size = androidx.compose.ui.geometry.Size(w, h),
+                    color = Accent, topLeft = androidx.compose.ui.geometry.Offset((size.width - w) / 2, (size.height - h) / 2), size = androidx.compose.ui.geometry.Size(w, h),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f * density / 2f)
                 )
                 val iw = w * 0.5f; val ih = h * 0.28f
                 drawRoundRect(
-                    color = AccentBlue, topLeft = androidx.compose.ui.geometry.Offset((size.width - iw) / 2, (size.height - ih) / 2), size = androidx.compose.ui.geometry.Size(iw, ih),
+                    color = Accent, topLeft = androidx.compose.ui.geometry.Offset((size.width - iw) / 2, (size.height - ih) / 2), size = androidx.compose.ui.geometry.Size(iw, ih),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(ih / 2)
                 )
             }

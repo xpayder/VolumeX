@@ -52,7 +52,7 @@ fun TransferProgressCard(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(AccentBlue.copy(alpha = 0.15f)),
+                        .background(Accent.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (progress.isComplete) {
@@ -72,7 +72,7 @@ fun TransferProgressCard(
                     } else {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = AccentBlue,
+                            color = Accent,
                             strokeWidth = 2.dp
                         )
                     }
@@ -147,7 +147,7 @@ fun TransferProgressCard(
                             .clip(RoundedCornerShape(2.dp))
                             .background(
                                 Brush.horizontalGradient(
-                                    listOf(AccentBlue, AccentPurple)
+                                    listOf(Accent, AccentSky)
                                 )
                             )
                     )

@@ -64,7 +64,7 @@ fun TextViewer(uri: Uri, modifier: Modifier = Modifier, lineNumbers: Boolean) {
         }
     }
     val l = lines
-    if (l == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }; return }
+    if (l == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }; return }
     SelectionContainer {
         LazyColumn(modifier.padding(horizontal = 12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
             itemsIndexed(l) { i, line ->
@@ -92,7 +92,7 @@ fun PdfViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
     }
     DisposableEffect(uri) { onDispose { try { renderer?.close() } catch (_: Exception) {} } }
     val r = renderer
-    if (r == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }; return }
+    if (r == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }; return }
     BoxWithConstraints(
         modifier.pointerInput(Unit) {
             awaitEachGesture {
@@ -131,7 +131,7 @@ fun PdfViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
                         }
                     }
                     Box(Modifier.fillMaxWidth().aspectRatio(ratio).background(Color.White), contentAlignment = Alignment.Center) {
-                        bmp?.let { Image(it.asImageBitmap(), "Page ${index + 1}", Modifier.fillMaxSize()) } ?: CircularProgressIndicator(color = AccentBlue, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                        bmp?.let { Image(it.asImageBitmap(), "Page ${index + 1}", Modifier.fillMaxSize()) } ?: CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
                     }
                 }
             }
@@ -146,7 +146,7 @@ fun PdfViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
 fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier, onHex: (() -> Unit)? = null) {
     Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Box(Modifier.size(88.dp).clip(RoundedCornerShape(26.dp)).background(Color(0x1FFFFFFF)).border(1.dp, GlassBorderFaint, RoundedCornerShape(26.dp)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.InsertDriveFile, null, tint = AccentBlue, modifier = Modifier.size(42.dp))
+            Icon(Icons.Default.InsertDriveFile, null, tint = Accent, modifier = Modifier.size(42.dp))
         }
         Spacer(Modifier.height(18.dp))
         Text(entry.name, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -154,13 +154,13 @@ fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onSh
         Text("${entry.extension.uppercase().ifEmpty { "FILE" }} · ${entry.formattedSize}", color = TextTertiary, fontSize = 13.sp, fontFamily = Mono)
         if (hint != null) { Spacer(Modifier.height(10.dp)); Text(hint, color = TextSecondary, fontSize = 13.sp) }
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onOpen, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy)) {
+        Button(onClick = onOpen, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy)) {
             Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(8.dp)); Text("Open with…", fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(10.dp))
         OutlinedButton(onClick = onShare, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
             Icon(Icons.Default.Share, null, tint = TextPrimary); Spacer(Modifier.width(8.dp)); Text("Share", color = TextPrimary)
         }
-        if (onHex != null) TextButton(onClick = onHex) { Text("View as hex", color = AccentBlue) }
+        if (onHex != null) TextButton(onClick = onHex) { Text("View as hex", color = Accent) }
     }
 }

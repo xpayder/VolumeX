@@ -34,7 +34,7 @@ fun DriveCard(
     locked: Boolean = false
 ) {
     val accent = when (volume.type.uppercase()) {
-        "APFS" -> Color(0xFF7BA7FF); "HFS+", "HFSX" -> Color(0xFF9B8CFF); "EXFAT" -> Color(0xFF4CD6A8); "FAT32" -> Color(0xFFFFB35C); else -> AccentBlue
+        "APFS" -> Color(0xFF7BA7FF); "HFS+", "HFSX" -> Color(0xFF9B8CFF); "EXFAT" -> Color(0xFF4CD6A8); "FAT32" -> Color(0xFFFFB35C); else -> Accent
     }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
@@ -101,7 +101,7 @@ fun DriveCard(
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = onOpen, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy)
+                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy)
             ) {
                 Icon(if (locked) Icons.Default.LockOpen else Icons.Default.FolderOpen, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
                 Text(if (locked) "Unlock" else "Open", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)

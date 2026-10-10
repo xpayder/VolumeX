@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
@@ -39,6 +40,27 @@ import kotlinx.coroutines.launch
 /**
  * Simple enum-based navigation without Navigation Compose (to avoid additional dependencies).
  */
+private fun screenDepth(s: Screen) = when (s) {
+    is Screen.Home -> 0
+    is Screen.VolumePicker, is Screen.Unlock -> 1
+    is Screen.FileBrowser -> 2
+    else -> 3
+}
+
+/** Forward moves slide in from the right over a slightly receding page; back reverses it. One curve, one duration. */
+private fun screenTransition(from: Screen, to: Screen): androidx.compose.animation.ContentTransform {
+    val ease = com.fatalpuppet.volumex.ui.components.GlassEase
+    val forward = screenDepth(to) >= screenDepth(from)
+    val dir = if (forward) 1 else -1
+    val enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(460, easing = ease)) { (it * 0.16f).toInt() * dir } +
+        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(340, delayMillis = 60, easing = ease)) +
+        androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(460, easing = ease), initialScale = if (forward) 0.985f else 1.015f)
+    val exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(460, easing = ease)) { -(it * 0.10f).toInt() * dir } +
+        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240, easing = ease)) +
+        androidx.compose.animation.scaleOut(androidx.compose.animation.core.tween(460, easing = ease), targetScale = if (forward) 0.985f else 1.015f)
+    return (enter togetherWith exit).apply { targetContentZIndex = if (forward) 1f else 0f }
+}
+
 sealed class Screen {
     object Home : Screen()
     object VolumePicker : Screen()
@@ -104,15 +126,29 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val haze = dev.chrisbanes.haze.rememberHazeState()
+                val overlays = remember { com.fatalpuppet.volumex.ui.components.OverlayHost() }
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.fatalpuppet.volumex.ui.theme.LocalHaze provides haze,
+                    com.fatalpuppet.volumex.ui.components.LocalOverlayHost provides overlays,
+                ) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                // One backdrop for the whole app: screens move over it, it never changes, so glass keeps its surroundings.
+                com.fatalpuppet.volumex.ui.theme.AmbientBackdrop(haze, androidx.compose.ui.Modifier.fillMaxSize())
                 // targetSdk 36+ forces edge-to-edge: keep content clear of status/nav bars and the cutout.
                 androidx.compose.foundation.layout.Box(
                     androidx.compose.ui.Modifier
                         .fillMaxSize()
-                        .background(com.fatalpuppet.volumex.ui.theme.DeepNavy)
                         .safeDrawingPadding()
                 ) {
 
-                when (val screen = currentScreen) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = currentScreen,
+                    contentKey = { it::class },
+                    transitionSpec = { screenTransition(initialState, targetState) },
+                    label = "screen"
+                ) { screen ->
+                when (screen) {
                     is Screen.Home -> {
                         HomeScreen(
                             viewModel = mainViewModel,
@@ -197,6 +233,10 @@ class MainActivity : ComponentActivity() {
                             onNavigateBack = { currentScreen = Screen.Home }
                         )
                     }
+                }
+                }
+                }
+                overlays.Render()
                 }
                 }
             }

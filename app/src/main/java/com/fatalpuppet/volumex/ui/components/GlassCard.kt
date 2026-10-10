@@ -19,7 +19,7 @@ import com.fatalpuppet.volumex.ui.theme.GlassEffect
 import com.fatalpuppet.volumex.ui.theme.GlassWhite12
 import com.fatalpuppet.volumex.ui.theme.GlassWhite16
 import com.fatalpuppet.volumex.ui.theme.GlassWhite8
-import com.fatalpuppet.volumex.ui.theme.glassBackground
+import com.fatalpuppet.volumex.ui.theme.glassOrSolid
 import com.fatalpuppet.volumex.ui.theme.glassCardBackground
 
 /**
@@ -36,11 +36,7 @@ fun GlassCard(
 ) {
     val shape = RoundedCornerShape(cornerRadius)
     Box(
-        modifier = modifier
-            .then(
-                if (elevated) Modifier.glassCardBackground(shape)
-                else Modifier.glassBackground(shape)
-            ),
+        modifier = modifier.glassOrSolid(shape, if (elevated) com.fatalpuppet.volumex.ui.theme.GlassLevel.Bar else com.fatalpuppet.volumex.ui.theme.GlassLevel.Card),
         content = content
     )
 }
@@ -51,7 +47,7 @@ fun GlassCard(
 @Composable
 fun AccentGlassCard(
     modifier: Modifier = Modifier,
-    accentColor: Color = com.fatalpuppet.volumex.ui.theme.AccentBlue,
+    accentColor: Color = com.fatalpuppet.volumex.ui.theme.Accent,
     content: @Composable BoxScope.() -> Unit
 ) {
     val shape = GlassEffect.DefaultShape

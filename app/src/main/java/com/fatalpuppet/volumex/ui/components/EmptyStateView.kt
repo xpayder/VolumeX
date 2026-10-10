@@ -68,7 +68,7 @@ fun EmptyStateView(
                     .size(120.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(AccentBlue.copy(alpha = glowAlpha))
+                    .background(Accent.copy(alpha = glowAlpha))
             )
             // Inner circle
             Box(
@@ -85,7 +85,7 @@ fun EmptyStateView(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = AccentBlue,
+                    tint = Accent,
                     modifier = Modifier.size(36.dp)
                 )
             }
@@ -140,7 +140,7 @@ fun EmptyFolderView(path: String) {
             Icon(
                 imageVector = Icons.Default.FolderOpen,
                 contentDescription = null,
-                tint = AccentBlue.copy(alpha = 0.6f),
+                tint = Accent.copy(alpha = 0.6f),
                 modifier = Modifier.size(36.dp)
             )
         }
@@ -163,7 +163,7 @@ fun LiquidButton(
         enabled = enabled,
         modifier = modifier,
         colors = ButtonDefaults.buttonColors(
-            containerColor = AccentBlue,
+            containerColor = Accent,
             contentColor = TextPrimary,
             disabledContainerColor = GlassWhite8,
             disabledContentColor = TextDisabled

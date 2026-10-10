@@ -72,7 +72,7 @@ object AudioSession {
 fun AudioPlayButton(modifier: Modifier = Modifier) {
     val s = AudioSession.player ?: return
     Box(
-        modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(AccentBlue).clickable { s.toggle() },
+        modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Accent).clickable { s.toggle() },
         contentAlignment = Alignment.Center
     ) {
         if (s.buffering && !s.playing) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
@@ -110,7 +110,7 @@ fun AudioSeekLine(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.CenterStart
     ) {
         Box(Modifier.fillMaxWidth().height(3.dp).clip(CircleShape).background(Color(0x26FFFFFF)))
-        Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(CircleShape).background(AccentBlue))
+        Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(CircleShape).background(Accent))
     }
 }
 

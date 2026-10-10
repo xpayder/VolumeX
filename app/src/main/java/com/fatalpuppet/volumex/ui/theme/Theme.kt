@@ -11,13 +11,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary           = AccentBlue,
+    primary           = Accent,
     onPrimary         = TextPrimary,
-    primaryContainer  = AccentBlueDim,
+    primaryContainer  = AccentDim,
     onPrimaryContainer = TextPrimary,
-    secondary         = AccentPurple,
+    secondary         = AccentSky,
     onSecondary       = TextPrimary,
-    secondaryContainer = AccentPurpleDim,
+    secondaryContainer = AccentSkyDim,
     onSecondaryContainer = TextPrimary,
     tertiary          = AccentGreen,
     onTertiary        = TextPrimary,

@@ -128,7 +128,7 @@ fun VlcVideoPlayerView(
         } else {
             AndroidView(factory = { c -> VLCVideoLayout(c).also { s.attach(it) } }, modifier = Modifier.fillMaxSize())
             Box(Modifier.matchParentSize().clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { controls = !controls; touch++ })
-            if (s.buffering && !s.playing) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.align(Alignment.Center))
+            if (s.buffering && !s.playing) CircularProgressIndicator(color = Accent, modifier = Modifier.align(Alignment.Center))
             Text(
                 "SOFTWARE DECODER", color = TextSecondary, fontSize = 9.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x990B1016)).padding(horizontal = 8.dp, vertical = 4.dp)

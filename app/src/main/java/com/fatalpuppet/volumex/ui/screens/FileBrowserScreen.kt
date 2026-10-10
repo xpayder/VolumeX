@@ -125,11 +125,11 @@ fun FileBrowserScreen(
         }
     }
 
-    val hazeState = rememberHazeState()
+    val hazeState = LocalHaze.current ?: rememberHazeState()
     var headerPx by remember { mutableIntStateOf(0) }
     val headerDp = with(LocalDensity.current) { headerPx.toDp() }
 
-    Box(Modifier.fillMaxSize().background(DeepNavy)) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.align(Alignment.TopCenter).zIndex(1f).onSizeChanged { headerPx = it.height }) {
             // ── header card ──────────────────────────────────────────────────
             Column(
@@ -140,7 +140,7 @@ fun FileBrowserScreen(
                     IconButton(onClick = { back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary) }
                     Text(
                         if (selected.isNotEmpty()) "${selected.size} selected" else title,
-                        color = if (selected.isNotEmpty()) AccentBlue else TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (selected.isNotEmpty()) Accent else TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                     )
                     if (selected.isNotEmpty()) {
@@ -156,25 +156,19 @@ fun FileBrowserScreen(
                         IconButton(onClick = { searchActive = !searchActive; if (!searchActive) viewModel.search("") }) { Icon(Icons.Default.Search, "Search", tint = TextSecondary) }
                         Box {
                             IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More", tint = TextSecondary) }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, modifier = Modifier.background(DarkCard)) {
+                            if (menuOpen) GlassMenu(onDismissRequest = { menuOpen = false }) {
                                 SortBy.values().forEach { sort ->
-                                    DropdownMenuItem(
-                                        text = { Text("Sort by ${sort.name.lowercase()}", color = if (sortBy == sort) AccentBlue else TextPrimary) },
-                                        leadingIcon = { if (sortBy == sort) Icon(Icons.Default.Check, null, tint = AccentBlue) else Spacer(Modifier.size(24.dp)) },
-                                        onClick = { viewModel.setSortBy(sort); menuOpen = false }
-                                    )
+                                    GlassMenuItem(
+                                        "Sort by ${sort.name.lowercase()}", tint = if (sortBy == sort) Accent else TextPrimary,
+                                        icon = { if (sortBy == sort) Icon(Icons.Default.Check, null, tint = Accent) else Spacer(Modifier.size(24.dp)) }
+                                    ) { viewModel.setSortBy(sort); menuOpen = false }
                                 }
-                                HorizontalDivider(color = GlassBorderFaint)
-                                DropdownMenuItem(
-                                    text = { Text(if (showHidden) "Hide hidden files" else "Show hidden files", color = TextPrimary) },
-                                    leadingIcon = { Icon(if (showHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility, null, tint = TextSecondary) },
-                                    onClick = { viewModel.toggleHidden(); menuOpen = false }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Settings", color = TextPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.Settings, null, tint = TextSecondary) },
-                                    onClick = { menuOpen = false; onOpenSettings() }
-                                )
+                                HorizontalDivider(color = GlassBorderFaint, modifier = Modifier.padding(vertical = 4.dp))
+                                GlassMenuItem(
+                                    if (showHidden) "Hide hidden files" else "Show hidden files",
+                                    icon = { Icon(if (showHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility, null, tint = TextSecondary) }
+                                ) { viewModel.toggleHidden(); menuOpen = false }
+                                GlassMenuItem("Settings", icon = { Icon(Icons.Default.Settings, null, tint = TextSecondary) }) { menuOpen = false; onOpenSettings() }
                             }
                         }
                     }
@@ -185,7 +179,7 @@ fun FileBrowserScreen(
                         items(breadcrumbs.size) { i ->
                             val c = breadcrumbs[i]; val last = i == breadcrumbs.lastIndex
                             Text(
-                                if (i == 0) driveName else c.name, color = if (last) TextSecondary else AccentBlue, fontSize = 12.sp, fontFamily = Mono,
+                                if (i == 0) driveName else c.name, color = if (last) TextSecondary else Accent, fontSize = 12.sp, fontFamily = Mono,
                                 maxLines = 1, modifier = Modifier.clickable(enabled = !last) { viewModel.navigateTo(c.path) }
                             )
                             if (!last) Text("›", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 2.dp))
@@ -207,7 +201,7 @@ fun FileBrowserScreen(
         Box(Modifier.fillMaxSize().hazeSource(hazeState)) {
             val display = if (searchActive && searchQuery.isNotBlank()) searchResults else visible
             when {
-                isLoading || (searchActive && isSearching) -> Box(Modifier.fillMaxSize().padding(top = headerDp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }
+                isLoading || (searchActive && isSearching) -> Box(Modifier.fillMaxSize().padding(top = headerDp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }
                 display.isEmpty() -> EmptyFolderView(path = if (searchActive) "No results for \"$searchQuery\"" else (breadcrumbs.lastOrNull()?.path ?: "/"))
                 viewMode == ViewMode.GRID -> LazyVerticalGrid(
                     columns = GridCells.Adaptive(104.dp), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp),
@@ -246,28 +240,28 @@ fun FileBrowserScreen(
 
         // ── dialogs ──────────────────────────────────────────────────────────
         if (askDest) {
-            AlertDialog(
+            GlassDialog(
                 onDismissRequest = { askDest = false; pendingCopy = emptyList() },
                 title = { Text("Save to phone", color = TextPrimary) },
                 text = {
                     Column {
-                        SheetRow(Icons.Default.Download, "Downloads / VolumeX") { askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList() }
+                        SheetRow(Icons.Default.Download, "Downloads / FeldKit") { askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList() }
                         SheetRow(Icons.Default.FolderOpen, "Choose another folder…") { askDest = false; saveTreeLauncher.launch(null) }
                         Text("Android's folder picker cannot pick Downloads or the storage root, so use the first option for those.", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 },
-                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }
             )
         }
         if (showNewFolder) TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
         renameTarget?.let { t -> TextInputDialog("Rename", t.name, "Rename", { renameTarget = null }) { viewModel.renameEntry(t, it); renameTarget = null } }
         if (deleteTargets.isNotEmpty()) {
-            AlertDialog(
+            GlassDialog(
                 onDismissRequest = { deleteTargets = emptyList() },
                 title = { Text("Delete ${deleteTargets.size} item${if (deleteTargets.size != 1) "s" else ""}?", color = TextPrimary) },
                 text = { Text("This permanently removes ${if (deleteTargets.size == 1) "\"${deleteTargets[0].name}\"" else "the selected items"} from the drive. It cannot be undone.", color = TextSecondary) },
                 confirmButton = { TextButton(onClick = { viewModel.deleteEntries(deleteTargets); deleteTargets = emptyList() }) { Text("Delete", color = AccentRed) } },
-                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+                dismissButton = { TextButton(onClick = { deleteTargets = emptyList() }) { Text("Cancel", color = TextTertiary) } }
             )
         }
         propertiesOf?.let { e -> PropertiesDialog(e, driveName) { propertiesOf = null } }
@@ -279,11 +273,11 @@ fun FileBrowserScreen(
 
         // ── bottom sheet with the file actions ───────────────────────────────
         sheetEntry?.let { e ->
-            ModalBottomSheet(onDismissRequest = { sheetEntry = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = DarkSurface, shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), contentColor = TextPrimary) {
+            GlassSheet(onDismissRequest = { sheetEntry = null }) {
                 Column(Modifier.padding(bottom = 24.dp)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(DarkCard), contentAlignment = Alignment.Center) {
-                            Icon(if (e.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = AccentBlue)
+                            Icon(if (e.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = Accent)
                         }
                         Spacer(Modifier.width(12.dp))
                         Column {
@@ -333,7 +327,7 @@ private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, la
         Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(RoundedCornerShape(20.dp)).clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = Accent, modifier = Modifier.size(22.dp))
         Text(label, color = TextPrimary, fontSize = 11.sp, maxLines = 1)
     }
 }
@@ -354,7 +348,7 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boole
     Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(DarkCard)
-                .border(if (isSelected || playing) 2.dp else 1.dp, if (isSelected || playing) AccentBlue else GlassBorderFaint, RoundedCornerShape(14.dp)),
+                .border(if (isSelected || playing) 2.dp else 1.dp, if (isSelected || playing) Accent else GlassBorderFaint, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (entry.fileType == FileType.VIDEO) {
@@ -367,7 +361,7 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boole
                     contentDescription = entry.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
                 )
             } else if (playing) {
-                Icon(if (AudioSession.player?.playing == true) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = AccentBlue, modifier = Modifier.size(44.dp))
+                Icon(if (AudioSession.player?.playing == true) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = Accent, modifier = Modifier.size(44.dp))
             } else {
                 Icon(
                     when (entry.fileType) {
@@ -376,10 +370,10 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boole
                         else -> Icons.Default.InsertDriveFile
                     },
                     null, modifier = Modifier.size(40.dp),
-                    tint = when (entry.fileType) { FileType.DIRECTORY -> AccentBlue; FileType.VIDEO -> AccentOrange; FileType.AUDIO -> AccentGreen; else -> TextTertiary }
+                    tint = when (entry.fileType) { FileType.DIRECTORY -> Accent; FileType.VIDEO -> AccentOrange; FileType.AUDIO -> AccentGreen; else -> TextTertiary }
                 )
             }
-            if (isSelected) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape).background(AccentBlue), contentAlignment = Alignment.Center) {
+            if (isSelected) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Check, null, tint = DeepNavy, modifier = Modifier.size(16.dp))
             }
             Box(
@@ -405,7 +399,7 @@ private fun BrowserSearchField(query: String, onChange: (String) -> Unit, onClos
         androidx.compose.foundation.text.BasicTextField(
             value = query, onValueChange = onChange, modifier = Modifier.weight(1f), singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 15.sp),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentBlue),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
             decorationBox = { inner -> Box { if (query.isEmpty()) Text("Search this drive", color = TextTertiary, fontSize = 15.sp); inner() } }
         )
         IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "Close search", tint = TextTertiary, modifier = Modifier.size(16.dp)) }
@@ -415,7 +409,7 @@ private fun BrowserSearchField(query: String, onChange: (String) -> Unit, onClos
 @Composable
 private fun PropertiesDialog(e: FileSystemEntry, drive: String, onDismiss: () -> Unit) {
     fun date(ms: Long) = if (ms <= 0) "—" else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ms))
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
         title = { Text("Properties", color = TextPrimary) },
         text = {
@@ -426,7 +420,7 @@ private fun PropertiesDialog(e: FileSystemEntry, drive: String, onDismiss: () ->
                 PropRow("Modified", date(e.modifiedAt)); PropRow("Created", date(e.createdAt))
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Accent) } }
     )
 }
 
@@ -438,11 +432,11 @@ private fun PropRow(k: String, v: String) {
 @Composable
 private fun TextInputDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var text by remember { mutableStateOf(initial) }
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss, title = { Text(title, color = TextPrimary) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)) },
-        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = AccentBlue) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }, containerColor = DarkCard, shape = RoundedCornerShape(28.dp)
+        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }
     )
 }
 

@@ -58,15 +58,10 @@ fun FileVaultUnlockScreen(
         }
     }
 
-    val hazeState = dev.chrisbanes.haze.rememberHazeState()
-    androidx.compose.runtime.CompositionLocalProvider(LocalHaze provides hazeState) {
+    run {
     Box(Modifier.fillMaxSize()) {
-    AmbientBackdrop(hazeState, Modifier.fillMaxSize())
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onNavigateBack) { Icon(Icons.Default.ArrowBack, "Back to drive", tint = TextPrimary) }
-            Text("Back to drive", color = TextSecondary, fontSize = 14.sp)
-        }
+        com.fatalpuppet.volumex.ui.components.GlassTopBar(title = "Unlock drive", onBack = onNavigateBack)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -74,10 +69,10 @@ fun FileVaultUnlockScreen(
             Spacer(Modifier.height(28.dp))
             Box(
                 Modifier.size(92.dp).clip(RoundedCornerShape(28.dp))
-                    .background(Brush.linearGradient(listOf(AccentBlue.copy(alpha = 0.30f), AccentBlue.copy(alpha = 0.08f))))
+                    .background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.30f), Accent.copy(alpha = 0.08f))))
                     .border(1.dp, GlassBorderFaint, RoundedCornerShape(28.dp)),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.Lock, null, tint = AccentBlue, modifier = Modifier.size(44.dp)) }
+            ) { Icon(Icons.Default.Lock, null, tint = Accent, modifier = Modifier.size(44.dp)) }
             Spacer(Modifier.height(22.dp))
             Text(volume.name.ifBlank { "Encrypted drive" }, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
@@ -102,9 +97,9 @@ fun FileVaultUnlockScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentBlue, unfocusedBorderColor = GlassBorder, errorBorderColor = AccentRed,
-                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = AccentBlue,
-                    focusedLabelColor = AccentBlue, unfocusedLabelColor = TextTertiary
+                    focusedBorderColor = Accent, unfocusedBorderColor = GlassBorder, errorBorderColor = AccentRed,
+                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
+                    focusedLabelColor = Accent, unfocusedLabelColor = TextTertiary
                 )
             )
             error?.let { Text(it, color = AccentRed, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp)) }
@@ -113,7 +108,7 @@ fun FileVaultUnlockScreen(
             Button(
                 onClick = { submit() }, enabled = secret.isNotBlank() && !busy,
                 modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy, disabledContainerColor = AccentBlue.copy(alpha = 0.25f))
+                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy, disabledContainerColor = Accent.copy(alpha = 0.25f))
             ) {
                 if (busy) {
                     CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
@@ -124,7 +119,7 @@ fun FileVaultUnlockScreen(
                 }
             }
             TextButton(onClick = { recoveryMode = !recoveryMode; secret = ""; error = null }, enabled = !busy) {
-                Text(if (recoveryMode) "Use password instead" else "Use recovery key instead", color = AccentBlue, fontSize = 14.sp)
+                Text(if (recoveryMode) "Use password instead" else "Use recovery key instead", color = Accent, fontSize = 14.sp)
             }
 
             Spacer(Modifier.height(20.dp))

@@ -1,5 +1,9 @@
 package com.fatalpuppet.volumex.ui.screens
 
+import com.fatalpuppet.volumex.ui.components.GlassDialog
+import com.fatalpuppet.volumex.ui.components.GlassSheet
+import com.fatalpuppet.volumex.ui.components.GlassMenu
+import com.fatalpuppet.volumex.ui.components.GlassMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,31 +41,9 @@ fun SettingsScreen(
     ) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(DeepNavy, DarkNavy)))
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(GlassWhite8)
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Settings",
-                    color = TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
+            com.fatalpuppet.volumex.ui.components.GlassTopBar(title = "Settings", onBack = onNavigateBack)
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -91,7 +73,7 @@ fun SettingsScreen(
                         )
                     }
                     if (confirmNtfs) {
-                        AlertDialog(
+                        GlassDialog(
                             onDismissRequest = { confirmNtfs = false },
                             title = { Text("Enable NTFS writing?", color = TextPrimary) },
                             text = { Text("This is experimental. Use it only on drives you have backed up, make sure Windows fully shut down (not hibernated), and never unplug the drive during a transfer.", color = TextSecondary) },
@@ -99,13 +81,12 @@ fun SettingsScreen(
                                 ntfsWrite = true; confirmNtfs = false
                                 prefs.edit().putBoolean("ntfs_write", true).apply()
                                 com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableNtfsWrite = true
-                            }) { Text("Enable", color = AccentBlue) } },
-                            dismissButton = { TextButton(onClick = { confirmNtfs = false }) { Text("Cancel", color = TextTertiary) } },
-                            containerColor = DarkCard, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
+                            }) { Text("Enable", color = Accent) } },
+                            dismissButton = { TextButton(onClick = { confirmNtfs = false }) { Text("Cancel", color = TextTertiary) } }
                         )
                     }
                     if (confirmApfs) {
-                        AlertDialog(
+                        GlassDialog(
                             onDismissRequest = { confirmApfs = false },
                             title = { Text("Enable APFS writing?", color = TextPrimary) },
                             text = { Text("This is experimental. Only use it on drives whose contents you have backed up, and never unplug the drive while a transfer is running.", color = TextSecondary) },
@@ -113,10 +94,8 @@ fun SettingsScreen(
                                 apfsWrite = true; confirmApfs = false
                                 prefs.edit().putBoolean("apfs_write", true).apply()
                                 com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite = true
-                            }) { Text("Enable", color = AccentBlue) } },
-                            dismissButton = { TextButton(onClick = { confirmApfs = false }) { Text("Cancel", color = TextTertiary) } },
-                            containerColor = DarkCard,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
+                            }) { Text("Enable", color = Accent) } },
+                            dismissButton = { TextButton(onClick = { confirmApfs = false }) { Text("Cancel", color = TextTertiary) } }
                         )
                     }
                 }
@@ -158,7 +137,7 @@ fun SettingsScreen(
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Button(
                                 enabled = !testing, shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy),
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy),
                                 onClick = {
                                     testing = true; speedText = "Reading 64 MB straight from the drive…"
                                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -251,7 +230,7 @@ fun SettingsScreen(
     }
 
     if (showDeleteConfirm != null) {
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { showDeleteConfirm = null },
             title = { Text("Delete saved password?", color = TextPrimary) },
             text = {
@@ -273,12 +252,9 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = null }) {
-                    Text("Cancel", color = AccentBlue)
+                    Text("Cancel", color = Accent)
                 }
-            },
-            containerColor = Color(0xFF1C2135),
-            titleContentColor = TextPrimary,
-            textContentColor = TextSecondary
+            }
         )
     }
 }
@@ -300,7 +276,7 @@ private fun SettingsSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(GlassWhite8, RoundedCornerShape(16.dp))
+                .glassOrSolid(RoundedCornerShape(22.dp), GlassLevel.Card)
         ) {
             content()
         }
@@ -321,7 +297,7 @@ private fun SettingsToggleRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = Accent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontSize = 15.sp)
@@ -332,7 +308,7 @@ private fun SettingsToggleRow(
             onCheckedChange = { onToggle() },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = AccentBlue,
+                checkedTrackColor = Accent,
                 uncheckedThumbColor = Color.White,
                 uncheckedTrackColor = GlassWhite12
             )
@@ -352,7 +328,7 @@ private fun SettingsInfoRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = Accent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column {
             Text(title, color = TextPrimary, fontSize = 15.sp)
@@ -372,7 +348,7 @@ private fun SavedPasswordRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.Lock, null, tint = AccentPurple, modifier = Modifier.size(22.dp))
+        Icon(Icons.Default.Lock, null, tint = AccentSky, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text("Saved password", color = TextPrimary, fontSize = 15.sp)

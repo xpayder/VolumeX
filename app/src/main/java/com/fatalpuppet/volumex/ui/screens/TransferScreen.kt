@@ -30,50 +30,20 @@ fun TransferScreen(
     val queue by viewModel.queue.collectAsState()
     val isTransferring by viewModel.isTransferring.collectAsState()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(listOf(DeepNavy, DarkNavy, NavyMid))
-            )
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassBackground(
-                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        borderWidth = 0.dp
-                    )
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onNavigateBack, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Transfers", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            text = if (isTransferring) "${queue.count { !it.isComplete && it.error == null }} active" else "${queue.size} items",
-                            color = TextTertiary,
-                            fontSize = 12.sp
-                        )
-                    }
+            com.fatalpuppet.volumex.ui.components.GlassTopBar(
+                title = "Transfers",
+                subtitle = if (isTransferring) "${queue.count { !it.isComplete && it.error == null }} active" else "${queue.size} items",
+                onBack = onNavigateBack,
+                actions = {
                     if (isTransferring) {
-                        LiquidButton(
-                            label = "Cancel All",
-                            onClick = { viewModel.cancelAll() },
-                            modifier = Modifier.height(36.dp)
-                        )
+                        LiquidButton(label = "Cancel All", onClick = { viewModel.cancelAll() }, modifier = Modifier.height(36.dp))
                     } else if (queue.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.clearQueue() }) {
-                            Icon(Icons.Default.ClearAll, "Clear", tint = TextSecondary)
-                        }
+                        IconButton(onClick = { viewModel.clearQueue() }) { Icon(Icons.Default.ClearAll, "Clear", tint = TextSecondary) }
                     }
                 }
-            }
+            )
 
             // Stats summary
             if (queue.isNotEmpty()) {
@@ -120,7 +90,7 @@ private fun TransferSummaryRow(queue: List<TransferProgress>) {
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        SummaryChip(label = "Active", count = active, color = AccentBlue, modifier = Modifier.weight(1f))
+        SummaryChip(label = "Active", count = active, color = Accent, modifier = Modifier.weight(1f))
         SummaryChip(label = "Done", count = completed, color = AccentGreen, modifier = Modifier.weight(1f))
         if (failed > 0) {
             SummaryChip(label = "Failed", count = failed, color = AccentRed, modifier = Modifier.weight(1f))
