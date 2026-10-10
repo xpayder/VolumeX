@@ -5,5 +5,7 @@
         <item name="android:colorBackground">#FF0A0C0F</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">#FF0A0C0F</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FF10222B</item>
     </style>
 </resources>

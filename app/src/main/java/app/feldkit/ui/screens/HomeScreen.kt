@@ -1,5 +1,6 @@
 package app.feldkit.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -36,10 +37,15 @@ fun HomeScreen(
     run {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            app.feldkit.ui.components.GlassTopBar(
-                title = "FeldKit",
-                actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TextSecondary) } }
-            )
+            // Brand row: mark and name sit directly on the backdrop (glass is never stacked on glass); only the button is glass.
+            Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 12.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(app.feldkit.R.drawable.ic_logo_mark), null, Modifier.size(width = 24.dp, height = 36.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("FeldKit", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Box(Modifier.size(44.dp).glassOrSolid(RoundedCornerShape(22.dp), GlassLevel.Chip).clip(RoundedCornerShape(22.dp)).clickable(onClick = onOpenSettings), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
+                }
+            }
 
             // Content
             AnimatedContent(
