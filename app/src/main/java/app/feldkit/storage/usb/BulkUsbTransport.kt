@@ -20,7 +20,7 @@ class BulkUsbTransport(
 
     fun send(
         data: ByteArray,
-        timeout: Int = 3000
+        timeout: Int = UsbTuning.receiveTimeoutMs
     ): BulkTransferResult {
 
         if (UsbTuning.verbose) Log.d(TAG, "USB OUT: endpoint=0x${"%02X".format(bulkOut.address)} maxPacket=${bulkOut.maxPacketSize} requested=${data.size}")
@@ -54,6 +54,19 @@ class BulkUsbTransport(
         }
         if (UsbTuning.verbose) Log.d(TAG, "USB IN: endpoint=0x${"%02X".format(bulkIn.address)} maxPacket=${bulkIn.maxPacketSize} requested=$size")
 
+        if (UsbTuning.receiveChunk > 0 && size > UsbTuning.receiveChunk) {
+            val out = ByteArray(size); var got = 0
+            val tmp = ByteArray(UsbTuning.receiveChunk)
+            while (got < size) {
+                val want = minOf(tmp.size, size - got)
+                val n = connection.bulkTransfer(bulkIn, tmp, want, timeout)
+                if (n < 0) return BulkTransferResult(false, got, null)
+                if (n == 0) break
+                System.arraycopy(tmp, 0, out, got, n); got += n
+                if (n < want) break
+            }
+            return BulkTransferResult(success = got > 0, bytesTransferred = got, data = if (got == size) out else out.copyOf(got))
+        }
         val buffer = ByteArray(size)
 
         val transferred = connection.bulkTransfer(
@@ -124,11 +137,17 @@ class BulkUsbTransport(
     }
 
     /** Bulk-Only Mass Storage Reset + clear both halts (USB MSC BOT 5.3.4 reset recovery). */
+    /** Re-selects the interface so the host controller forgets the halted state and data toggles of both bulk pipes. Set by the reader. */
+    @Volatile var resetPipes: (() -> Boolean)? = null
+
     fun resetRecovery(interfaceNumber: Int): Boolean {
         val r = connection.controlTransfer(0x21, 0xFF, 0, interfaceNumber, null, 0, 2000)
         Log.d(TAG, "BOT mass storage reset iface=$interfaceNumber result=$r")
         clearBulkInHalt()
         clearBulkOutHalt()
+        // a CLEAR_FEATURE sent as a plain control transfer does not reset the host side of the pipe; SET_INTERFACE does
+        val ok = try { resetPipes?.invoke() } catch (e: Exception) { Log.w(TAG, "pipe reset failed", e); null }
+        Log.d(TAG, "pipes re-selected: $ok")
         return r >= 0
     }
 

@@ -124,17 +124,17 @@ fun SettingsScreen(
                 }
                 item {
                     val sprefs = remember { context.getSharedPreferences("vx_prefs", android.content.Context.MODE_PRIVATE) }
-                    var fast by remember { mutableStateOf(sprefs.getBoolean("fast_usb", false)) }
+                    var fast by remember { mutableStateOf(sprefs.getBoolean("fast_usb_v2", true)) }
                     var speedText by remember { mutableStateOf<String?>(null) }
                     var testing by remember { mutableStateOf(false) }
                     val scope = androidx.compose.runtime.rememberCoroutineScope()
                     SettingsSection(title = "Drive speed") {
                         SettingsToggleRow(
                             icon = Icons.Default.Speed,
-                            title = "Fast USB reads (beta)",
-                            subtitle = "Keeps several USB requests in flight instead of one at a time. If your drive misbehaves it switches itself off. Run the speed test to see whether it helps on your drive.",
+                            title = "Fast USB reads",
+                            subtitle = "Keeps several USB requests in flight instead of one at a time. On a Crucial X8 this reads about four times faster. If a drive misbehaves it switches itself off. The speed test shows what your drive does.",
                             checked = fast,
-                            onToggle = { fast = !fast; sprefs.edit().putBoolean("fast_usb", fast).apply(); app.feldkit.storage.usb.UsbTuning.fastReads = fast }
+                            onToggle = { fast = !fast; sprefs.edit().putBoolean("fast_usb_v2", fast).apply(); app.feldkit.storage.usb.UsbTuning.fastReads = fast }
                         )
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                             GlassButton(
@@ -145,7 +145,13 @@ fun SettingsScreen(
                                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                         val dev = app.feldkit.storage.ActiveDriveSession.device as? app.feldkit.storage.usb.UsbBlockDeviceReader
                                         val msg = if (dev == null) "Connect a USB drive first - the test reads directly from the drive." else {
-                                            dev.speedReport(32)
+                                            val text = try { dev.speedReport(32) } catch (t: Throwable) { "The test crashed: ${t.javaClass.simpleName}: ${t.message}" }
+                                            // keep the full report plus this app's own log, so it can be read later at a computer
+                                            try {
+                                                val log = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "1500", "--pid=${android.os.Process.myPid()}")).inputStream.bufferedReader().readText()
+                                                java.io.File(context.filesDir, "last-speedtest.txt").writeText(text + "\n\n--- app log ---\n" + log)
+                                            } catch (_: Throwable) {}
+                                            text
                                         }
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { speedText = msg; testing = false }
                                     }

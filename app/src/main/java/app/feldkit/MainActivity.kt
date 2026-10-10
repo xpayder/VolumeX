@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
         transferViewModel.initialize(this)
         app.feldkit.storage.filesystem.FilesystemMounter.enableApfsWrite =
             getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("apfs_write", false)
-        app.feldkit.storage.usb.UsbTuning.fastReads = getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("fast_usb", false)
+        app.feldkit.storage.usb.UsbTuning.fastReads = getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("fast_usb_v2", true)
         app.feldkit.storage.filesystem.FilesystemMounter.enableNtfsWrite =
             getSharedPreferences("vx_prefs", MODE_PRIVATE).getBoolean("ntfs_write", false)
 

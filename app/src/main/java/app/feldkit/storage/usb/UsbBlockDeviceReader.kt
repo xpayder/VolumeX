@@ -198,7 +198,7 @@ class UsbBlockDeviceReader(
                 connection = usbConnection,
                 bulkIn = storageInterface.bulkIn,
                 bulkOut = storageInterface.bulkOut
-            )
+            ).also { t -> t.resetPipes = { usbConnection.setInterface(storageInterface.usbInterface) } }
         }
 
         claimed = true
@@ -353,6 +353,7 @@ class UsbBlockDeviceReader(
                     return false
                 }
 
+        diskSectors = capacity.blockCount.toLong() * capacity.blockSize / 512
         Log.i(
             TAG,
             "Disk: ${capacity.blockCount} blocks × " +
@@ -721,6 +722,10 @@ class UsbBlockDeviceReader(
         executor.resetRecovery(ifaceId())
     }
 
+    /** Size of the drive in 512-byte sectors, from READ CAPACITY. */
+    @Volatile private var diskSectors = 0L
+    override fun sectorCount(): Long = diskSectors
+
     private fun rawRead(lba: Long, count: Int): ByteArray? {
         val executor = scsiExecutor ?: return null
         val out = ByteArray(count * 512)
@@ -768,22 +773,50 @@ class UsbBlockDeviceReader(
         val total = sectorCount()
         val sectors = megabytes * 2048
         val sb = StringBuilder("Drive reports %.1f GB (%d sectors)\n".format(total * 512.0 / 1e9, total))
-        if (total < sectors * 2L + 8192) return sb.append("That is too small for a ${megabytes} MB test.").toString()
-        val start = (total / 2) - (total / 2) % 8
-        for (cmd in intArrayOf(64, 256, 1024, 2048)) {
-            var done = 0; var err: String? = null
-            val t0 = System.nanoTime()
-            while (done < sectors) {
-                val n = minOf(cmd, sectors - done)
-                val tr = try { executor.read10(lba = start + done, blockCount = n, blockSize = 512) } catch (e: Exception) { err = "exception ${e.javaClass.simpleName}: ${e.message} at +${done / 2048} MB"; break }
-                val d = tr.data
-                if (!tr.success || d == null || d.size < n * 512) { err = "${tr.message} (got ${d?.size ?: 0} of ${n * 512} bytes) at +${done / 2048} MB"; break }
-                done += n
-            }
-            val sec = (System.nanoTime() - t0) / 1e9
-            sb.append("%5d KB per command: ".format(cmd / 2))
-            if (err == null) sb.append("%.0f MB/s\n".format(megabytes / sec)) else { sb.append("FAILED - $err\n"); try { executor.resetRecovery(ifaceId()) } catch (_: Exception) {} }
+        if (total < sectors * 4L) return sb.append("That is too small for a ${megabytes} MB test.").toString()
+        fun recover() {
+            try { executor.resetRecovery(ifaceId()) } catch (_: Exception) {}
+            // a reset makes the drive report UNIT ATTENTION once; ask it so the next real command is not the one that gets it
+            try { repeat(2) { executor.execute("TEST UNIT READY", app.feldkit.storage.scsi.CommandBlockWrapper(tag = app.feldkit.storage.scsi.CommandTagGenerator.next(), dataTransferLength = 0, flags = 0, lun = 0, commandLength = 6, command = app.feldkit.storage.scsi.ScsiCommand.testUnitReady()), 0) } } catch (_: Exception) {}
         }
+        recover()
+        // 1. where on the disk can it be read at all? (8 sectors at several positions)
+        sb.append("Single reads (4 KB):\n")
+        val probes = longArrayOf(2048, 1_000_000, 50_000_000, 250_000_000, 500_000_000, total / 2, total - 100_000, total - 8)
+        var firstGood = -1L
+        for (lba in probes) {
+            val tr = try { executor.read10(lba = lba, blockCount = 8, blockSize = 512) } catch (e: Exception) { null }
+            val ok = tr != null && tr.success && tr.data != null && tr.data!!.size >= 4096
+            sb.append("  LBA %-11d %s\n".format(lba, if (ok) "ok" else "FAILED - ${tr?.message}"))
+            if (ok && firstGood < 0) firstGood = lba
+            if (!ok) recover()
+        }
+        if (firstGood < 0) return sb.append("The drive does not answer reads, so there is no speed to measure.").toString().also { Log.i(TAG, "speed report:\n$it") }
+        // 2. sequential speed from a position that works: command size x transfer strategy
+        sb.append("Sequential read of $megabytes MB from LBA $firstGood (MB/s):\n")
+        val savedFast = UsbTuning.fastReads; val savedChunk = UsbTuning.receiveChunk
+        class Strategy(val name: String, val fast: Boolean, val chunk: Int)
+        for (st in listOf(Strategy("one call per command", false, 0), Strategy("16 KB calls", false, 16384), Strategy("64 KB calls", false, 65536), Strategy("pipelined", true, 0))) {
+            UsbTuning.fastReads = st.fast; UsbTuning.receiveChunk = st.chunk
+            sb.append("  ${st.name}:\n")
+            for (cmd in intArrayOf(64, 256, 1024)) {
+                recover()
+                var done = 0; var err: String? = null
+                val t0 = System.nanoTime()
+                while (done < sectors) {
+                    val n = minOf(cmd, sectors - done)
+                    val tr = try { executor.read10(lba = firstGood + done, blockCount = n, blockSize = 512) } catch (e: Exception) { err = "exception ${e.javaClass.simpleName}: ${e.message}"; break }
+                    val d = tr.data
+                    if (!tr.success || d == null || d.size < n * 512) { err = "${tr.message} (got ${d?.size ?: 0} of ${n * 512}) at +${done / 2048} MB"; break }
+                    done += n
+                }
+                val sec = (System.nanoTime() - t0) / 1e9
+                sb.append("    %5d KB/command: ".format(cmd / 2))
+                if (err == null) sb.append("%.0f\n".format(megabytes / sec)) else sb.append("FAILED - $err\n")
+            }
+        }
+        UsbTuning.fastReads = savedFast; UsbTuning.receiveChunk = savedChunk
+        try { executor.resetRecovery(ifaceId()) } catch (_: Exception) {}
         Log.i(TAG, "speed report:\n$sb")
         return sb.toString().trimEnd()
     }
