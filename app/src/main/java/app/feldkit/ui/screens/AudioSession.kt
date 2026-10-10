@@ -113,13 +113,3 @@ fun AudioSeekLine(modifier: Modifier = Modifier) {
         Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(CircleShape).background(Accent))
     }
 }
-
-/** −10 s / +10 s, sized to take the place of the chevron on a folder row. */
-@Composable
-fun AudioSkipButtons() {
-    val s = AudioSession.player ?: return
-    Row {
-        IconButton(onClick = { s.seekBy(-10_000) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = TextSecondary, modifier = Modifier.size(22.dp)) }
-        IconButton(onClick = { s.seekBy(10_000) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Forward10, "Forward 10 seconds", tint = TextSecondary, modifier = Modifier.size(22.dp)) }
-    }
-}

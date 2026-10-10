@@ -163,7 +163,7 @@ internal fun TransportControls(
                 }
             }
             IconButton(onClick = { onPrev?.invoke(); onInteract() }, enabled = onPrev != null) { Icon(Icons.Default.SkipPrevious, "Previous", tint = if (onPrev != null) TextPrimary else TextDisabled) }
-            IconButton(onClick = { s.seekBy(-10_000); onInteract() }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = TextPrimary) }
+            if (!compact) IconButton(onClick = { s.seekBy(-10_000); onInteract() }) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = TextPrimary) }
             Box(
                 Modifier.size(big).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, AccentLight))).clickable { s.toggle(); onInteract() },
                 contentAlignment = Alignment.Center
@@ -171,7 +171,7 @@ internal fun TransportControls(
                 if (s.buffering && !s.playing) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.5.dp, modifier = Modifier.size(big * 0.5f))
                 else Icon(if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (s.playing) "Pause" else "Play", tint = DeepNavy, modifier = Modifier.size(big * 0.58f))
             }
-            IconButton(onClick = { s.seekBy(10_000); onInteract() }) { Icon(Icons.Default.Forward10, "Forward 10 seconds", tint = TextPrimary) }
+            if (!compact) IconButton(onClick = { s.seekBy(10_000); onInteract() }) { Icon(Icons.Default.Forward10, "Forward 10 seconds", tint = TextPrimary) }
             IconButton(onClick = { onNext?.invoke(); onInteract() }, enabled = onNext != null) { Icon(Icons.Default.SkipNext, "Next", tint = if (onNext != null) TextPrimary else TextDisabled) }
             if (onFullscreen != null) IconButton(onClick = onFullscreen) { Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Fullscreen", tint = TextPrimary) }
             else Spacer(Modifier.width(48.dp))

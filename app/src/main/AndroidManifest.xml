@@ -36,6 +36,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
             android:theme="@style/Theme.FeldKit">
 
             <intent-filter>

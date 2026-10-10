@@ -85,6 +85,7 @@ fun FilePreviewScreen(
 
     // landscape + hidden system bars while a video is fullscreen
     val activity = context as? android.app.Activity
+    val originalLandscape = remember { context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE }
     DisposableEffect(fullscreen) {
         val window = activity?.window
         val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
@@ -94,8 +95,12 @@ fun FilePreviewScreen(
             controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         onDispose {
-            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            if (fullscreen) {
+                // go back to the orientation we came from, then hand rotation back to the sensor (a phone lying flat has no sensor to do it)
+                activity?.requestedOrientation = if (originalLandscape) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }, 700)
+            }
         }
     }
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
@@ -111,7 +116,7 @@ fun FilePreviewScreen(
     val headerDp = with(LocalDensity.current) { headerPx.toDp() }
     val type = current.fileType
 
-    Box(modifier = Modifier.fillMaxSize().then(if (type == FileType.VIDEO) Modifier.background(androidx.compose.ui.graphics.Color.Black) else Modifier)) {
+    Box(modifier = Modifier.fillMaxSize()) {
         if (!fullscreen && (chrome || !isImage)) app.feldkit.ui.components.GlassTopBar(
             title = current.name,
             subtitle = if (items.size > 1) "${position + 1} of ${items.size} · ${current.formattedSize}" else current.formattedSize,

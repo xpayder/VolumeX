@@ -145,8 +145,29 @@ private fun aiffInfo(ctx: Context, uri: Uri): List<InfoGroup>? {
     return null
 }
 
+/** MIDI: what the file contains and how FeldKit will play it (the system decoder's numbers would describe something else). */
+private fun midiInfo(ctx: Context, uri: Uri): List<InfoGroup>? {
+    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    val song = app.feldkit.audio.midi.Smf.parse(bytes) ?: return null
+    val hint = (uri.getQueryParameter("path") ?: "").split('/').takeLast(2).joinToString(" ")
+    val verdict = app.feldkit.audio.midi.MidiClassifier.classify(song, hint)
+    val parts = song.notes.groupBy { it.channel }.toSortedMap().map { (ch, ns) ->
+        val what = if (ch in verdict.drums) "drum kit" + (verdict.remap[ch]?.let { " (${ns.size} hits of one drum)" } ?: "") else "piano"
+        InfoRow("Channel ${ch + 1}", "$what · ${ns.size} notes")
+    }
+    val rows = listOf(
+        InfoRow("Format", "Standard MIDI file"),
+        InfoRow("Duration", fmt((song.lengthSeconds * 1000).toLong())),
+        InfoRow("Notes", "${song.notes.size}"),
+        song.timeSignature?.let { InfoRow("Time signature", "${it.first}/${it.second}") },
+        InfoRow("Plays on this phone", "Yes - FeldKit's own piano and drum kit"),
+    ).filterNotNull()
+    return listOf(InfoGroup("MIDI", rows), InfoGroup("Parts", parts))
+}
+
 private fun readInfo(ctx: Context, uri: Uri): List<InfoGroup> {
     val ext = uri.getQueryParameter("path")?.substringAfterLast('.', "")?.lowercase()
+    if (ext == "mid" || ext == "midi" || ext == "kar") midiInfo(ctx, uri)?.let { return it }
     if (ext == "aif" || ext == "aiff" || ext == "aifc") aiffInfo(ctx, uri)?.let { return it }
     val groups = ArrayList<InfoGroup>()
     val r = MediaMetadataRetriever()
@@ -207,6 +228,8 @@ fun MediaInfoSheet(uri: Uri, name: String, onDismiss: () -> Unit) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 28.dp)) {
             Text(name, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(14.dp))
+            val ext = uri.getQueryParameter("path")?.substringAfterLast('.', "")?.lowercase().orEmpty()
+            if (ext in AudioTempoExt) TempoSection(uri)
             val g = groups
             when {
                 g == null -> CircularProgressIndicator(color = Accent, modifier = Modifier.padding(16.dp).size(24.dp))
@@ -313,5 +336,56 @@ object PsdPreview {
             return Bitmap.createBitmap(px, ow, oh, Bitmap.Config.ARGB_8888)
         }
         return null
+    }
+}
+
+
+private val AudioTempoExt = setOf("mp3", "aac", "flac", "wav", "m4a", "ogg", "oga", "opus", "wma", "mka", "mid", "midi", "kar", "amr", "aif", "aiff", "aifc", "ac3", "weba", "m4b", "caf")
+
+/** Tempo block of the media info sheet: measured BPM (or the exact tempo of a MIDI file), alternatives and the file's own tag. */
+@Composable
+private fun TempoSection(uri: Uri) {
+    val ctx = LocalContext.current
+    val info by produceState<app.feldkit.audio.TempoInfo?>(null, uri) { value = withContext(Dispatchers.IO) { try { app.feldkit.audio.TempoService.analyze(ctx, uri) } catch (_: Throwable) { null } } }
+    Text("TEMPO", color = Accent, fontSize = 11.sp, fontFamily = Mono, modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+    val i = info
+    if (i == null) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp)); Text("Measuring the tempo…", color = TextTertiary, fontSize = 13.sp)
+        }
+        return
+    }
+    val r = i.result
+    fun fmtBpm(b: Double) = if (b == Math.rint(b)) "%.0f".format(b) else "%.2f".format(b)
+    if (r != null) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+            Text("BPM", color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))
+            Column(Modifier.weight(1f)) {
+                Text(fmtBpm(r.bpm), color = Accent, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, fontFamily = Mono)
+                val note = when {
+                    i.fromFile -> if (i.variable) "from the file's tempo map (changes during the song)" else "stored in the MIDI file"
+                    r.loopBeats > 0 -> "loop of ${r.loopBeats} beats, ${r.loopBeats / 4} bar${if (r.loopBeats / 4 != 1) "s" else ""}"
+                    r.steady -> "steady tempo"
+                    else -> "average tempo (it drifts)"
+                }
+                Text(note, color = TextTertiary, fontSize = 12.sp)
+            }
+        }
+        if (r.alternates.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+            Text("Also reads as", color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))
+            Text(r.alternates.joinToString("  /  ") { fmtBpm(it) }, color = TextPrimary, fontSize = 13.sp, fontFamily = Mono, modifier = Modifier.weight(1f))
+        }
+    } else {
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+            Text("BPM", color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))
+            Text(if (i.unsupported) "This format cannot be analysed on the phone" else "No steady beat found", color = TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        }
+    }
+    i.tag?.let { t ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+            Text("In the file", color = TextTertiary, fontSize = 13.sp, modifier = Modifier.width(120.dp))
+            Text("${fmtBpm(t.bpm)}  (${t.source})", color = TextPrimary, fontSize = 13.sp, fontFamily = Mono, modifier = Modifier.weight(1f))
+        }
     }
 }

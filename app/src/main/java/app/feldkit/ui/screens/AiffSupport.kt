@@ -147,7 +147,11 @@ class DriveDataSource(private val ctx: Context) : DataSource {
     override fun addTransferListener(l: TransferListener) { listeners.add(l); delegate.addTransferListener(l) }
     override fun open(dataSpec: DataSpec): Long {
         val ext = dataSpec.uri.getQueryParameter("path")?.substringAfterLast('.', "")?.lowercase()
-        delegate = if (ext == "aif" || ext == "aiff" || ext == "aifc") AiffWavDataSource(ContentDataSource(ctx)) else ContentDataSource(ctx)
+        delegate = when (ext) {
+            "aif", "aiff", "aifc" -> AiffWavDataSource(ContentDataSource(ctx))
+            "mid", "midi", "kar", "rmi" -> MidiWavDataSource(ContentDataSource(ctx))
+            else -> ContentDataSource(ctx)
+        }
         listeners.forEach { delegate.addTransferListener(it) }
         return delegate.open(dataSpec)
     }
@@ -155,6 +159,74 @@ class DriveDataSource(private val ctx: Context) : DataSource {
     override fun getUri(): Uri? = delegate.uri
     override fun getResponseHeaders() = delegate.responseHeaders
     override fun close() = delegate.close()
+}
+
+/**
+ * MIDI is presented to ExoPlayer as a WAV that [app.feldkit.audio.midi.MidiRenderer] synthesises on demand (piano for pitched
+ * parts, a GM drum kit for drum parts). Blocks are rendered when read, so playback starts at once and seeking is free.
+ */
+@UnstableApi
+class MidiWavDataSource(private val upstream: DataSource) : DataSource {
+    private var uri: Uri? = null
+    private var renderer: app.feldkit.audio.midi.MidiRenderer? = null
+    private var pos = 0L
+    private var dataLen = 0L
+    private val header = ByteArray(44)
+    private val cache = LinkedHashMap<Int, ByteArray>()
+
+    override fun addTransferListener(transferListener: TransferListener) = upstream.addTransferListener(transferListener)
+
+    override fun open(dataSpec: DataSpec): Long {
+        uri = dataSpec.uri
+        val all = java.io.ByteArrayOutputStream()
+        upstream.open(DataSpec(dataSpec.uri))
+        val buf = ByteArray(1 shl 16)
+        while (true) { val r = upstream.read(buf, 0, buf.size); if (r <= 0) break; all.write(buf, 0, r); if (all.size() > 8 shl 20) break }
+        upstream.close()
+        val song = app.feldkit.audio.midi.Smf.parse(all.toByteArray()) ?: throw IOException("Not a readable MIDI file")
+        val hint = (dataSpec.uri.getQueryParameter("path") ?: "").split('/').takeLast(2).joinToString(" ")
+        val verdict = app.feldkit.audio.midi.MidiClassifier.classify(song, hint)
+        val r = app.feldkit.audio.midi.MidiRenderer(song, verdict.drums, verdict.remap)
+        renderer = r
+        dataLen = r.totalFrames.toLong() * 4
+        val h = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        h.put("RIFF".toByteArray()).putInt((36 + dataLen).toInt()).put("WAVE".toByteArray()).put("fmt ".toByteArray()).putInt(16)
+        h.putShort(1).putShort(2).putInt(r.sampleRate).putInt(r.sampleRate * 4).putShort(4).putShort(16).put("data".toByteArray()).putInt(dataLen.toInt())
+        pos = dataSpec.position
+        val remaining = 44 + dataLen - pos
+        return if (dataSpec.length == C.LENGTH_UNSET.toLong()) remaining else minOf(remaining, dataSpec.length)
+    }
+
+    private fun block(i: Int): ByteArray = synchronized(cache) {
+        cache[i]?.let { cache.remove(i); cache[i] = it; return it }
+        val pcm = renderer!!.render(i)
+        val bytes = java.nio.ByteBuffer.allocate(pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (s in pcm) bytes.putShort(s)
+        val out = bytes.array()
+        cache[i] = out
+        while (cache.size > 4) cache.remove(cache.keys.first())
+        out
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (length == 0) return 0
+        val total = 44 + dataLen
+        if (pos >= total) return C.RESULT_END_OF_INPUT
+        if (pos < 44) { val n = minOf(length.toLong(), 44 - pos).toInt(); System.arraycopy(header, pos.toInt(), buffer, offset, n); pos += n; return n }
+        val r = renderer ?: return C.RESULT_END_OF_INPUT
+        val rel = pos - 44
+        val frame = (rel / 4).toInt()
+        val bi = frame / r.blockFrames
+        val b = block(bi)
+        val inBlock = (rel - bi.toLong() * r.blockFrames * 4).toInt()
+        val n = minOf(length, b.size - inBlock, (total - pos).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        System.arraycopy(b, inBlock, buffer, offset, n); pos += n
+        return n
+    }
+
+    override fun getUri(): Uri? = uri
+    override fun getResponseHeaders(): Map<String, List<String>> = emptyMap()
+    override fun close() { renderer = null; synchronized(cache) { cache.clear() }; uri = null }
 }
 
 /** The one ExoPlayer configuration used by the video, audio and in-list players. */

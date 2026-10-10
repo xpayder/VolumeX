@@ -239,7 +239,12 @@ fun FileBrowserScreen(
             if (slow) CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.align(Alignment.Center).size(28.dp))
         }
 
-        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp, start = 16.dp, end = 16.dp))
+        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp, start = 16.dp, end = 16.dp)) { data ->
+            Text(
+                data.visuals.message, color = TextPrimary, fontSize = 14.sp,
+                modifier = Modifier.glassOrSolid(RoundedCornerShape(20.dp), GlassLevel.Sheet).padding(horizontal = 18.dp, vertical = 12.dp)
+            )
+        }
 
         // ── floating action pill ─────────────────────────────────────────────
         if (writable && selected.isEmpty() && !searchActive) {

@@ -28,6 +28,15 @@ corrupted. No paid "drive reader" subscription needed.
 | "view RAW photos / PSD / EXIF from a card on my phone" | viewer with zoom and an EXIF panel |
 | "unzip / unrar from an external drive on Android" | built-in archive browser and extractor |
 
+## For people who make music
+
+- **Real BPM of any audio file.** Open the info of a file and FeldKit measures its tempo on the phone (mp3, m4a/aac, flac, wav, aiff, ogg, opus...). It reads the tempo tags too and shows both, because a tag is often a rounded number. Loops that are cut to whole bars are locked to the exact tempo of the project they came from (typically to 0.01 BPM or better). Tracks without a steady beat say so instead of guessing.
+- **MIDI clips play with a piano and a drum kit.** Pitched parts sound as a piano, drum parts (GM channel 10, or a kit pattern on any channel, or a file named "Hi Hat 12" / "Kick 03") as a drum kit. Both are synthesised by FeldKit, so it sounds the same on every phone. The tempo is read from the file.
+
+### How accurate is the BPM?
+
+Measured, not promised: on synthetic tracks with a known tempo the error is at most 0.01 BPM (steady, swung, humanised and noisy grooves). On 450 real loops from sample packs whose names state their tempo (`tools/make-tempo-real.py` builds the check from your own library), about 79 % are exactly right, 9 % land on half / double time (the other reading is shown under "Also reads as"), and the rest are samples with no beat to find (risers, pads, vocals) or a wrong guess. Half / double time is genuinely ambiguous for a machine, so both readings are listed.
+
 ## Screenshots
 
 <!-- Screenshots are added once the interface is finished. See docs/screenshots/README.md -->

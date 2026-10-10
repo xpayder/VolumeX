@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import app.feldkit.ui.screens.AudioPlayButton
 import app.feldkit.ui.screens.AudioSeekLine
-import app.feldkit.ui.screens.AudioSkipButtons
 import app.feldkit.ui.screens.AudioTimeText
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -86,8 +85,7 @@ fun FileListItem(
                 }
             }
 
-            if (highlight) AudioSkipButtons()
-            else if (entry.isDirectory) Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(18.dp))
+            if (entry.isDirectory && !highlight) Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(18.dp))
         }
         if (highlight) AudioSeekLine(Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp))
     }
