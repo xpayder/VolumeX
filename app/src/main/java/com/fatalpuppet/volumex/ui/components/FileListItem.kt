@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fatalpuppet.volumex.storage.filesystem.FileSystemEntry
+import com.fatalpuppet.volumex.storage.filesystem.FileType
 import com.fatalpuppet.volumex.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -115,24 +116,16 @@ private fun FileIconBox(entry: FileSystemEntry) {
     }
 }
 
-private fun getFileIconAndColor(entry: FileSystemEntry): Pair<ImageVector, Color> {
-    if (entry.isDirectory) return Pair(Icons.Default.Folder, AccentBlue)
-    return when (entry.extension) {
-        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif" ->
-            Pair(Icons.Default.Image, AccentPurple)
-        "mp4", "mov", "avi", "mkv", "m4v" ->
-            Pair(Icons.Default.VideoFile, AccentOrange)
-        "mp3", "aac", "flac", "wav", "m4a" ->
-            Pair(Icons.Default.AudioFile, AccentGreen)
-        "pdf" -> Pair(Icons.Default.PictureAsPdf, AccentRed)
-        "zip", "gz", "tar", "7z", "rar" ->
-            Pair(Icons.Default.FolderZip, AccentOrange)
-        "txt", "md", "log" ->
-            Pair(Icons.Default.Description, TextSecondary)
-        "app", "dmg", "pkg" ->
-            Pair(Icons.Default.Apps, AccentPurple)
-        else -> Pair(Icons.Default.InsertDriveFile, TextTertiary)
-    }
+private fun getFileIconAndColor(entry: FileSystemEntry): Pair<ImageVector, Color> = when (entry.fileType) {
+    FileType.DIRECTORY -> Pair(Icons.Default.Folder, AccentBlue)
+    FileType.IMAGE -> Pair(Icons.Default.Image, AccentPurple)
+    FileType.VIDEO -> Pair(Icons.Default.VideoFile, AccentOrange)
+    FileType.AUDIO -> Pair(Icons.Default.AudioFile, AccentGreen)
+    FileType.PDF -> Pair(Icons.Default.PictureAsPdf, AccentRed)
+    FileType.ARCHIVE -> Pair(if (entry.extension in setOf("dmg", "pkg", "app")) Icons.Default.Apps else Icons.Default.FolderZip, AccentOrange)
+    FileType.TEXT, FileType.DOCUMENT -> Pair(Icons.Default.Description, TextSecondary)
+    FileType.CODE -> Pair(Icons.Default.Code, AccentBlue)
+    else -> Pair(Icons.Default.InsertDriveFile, TextTertiary)
 }
 
 private fun formatDate(ms: Long): String {

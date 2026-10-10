@@ -141,37 +141,6 @@ fun PdfViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
     }
 }
 
-/** Lists the entries of a ZIP (also .jar / .apk / .docx-style containers) by streaming it once. */
-@Composable
-fun ZipViewer(uri: Uri, modifier: Modifier = Modifier, onFail: () -> Unit) {
-    val ctx = LocalContext.current
-    var entries by remember(uri) { mutableStateOf<List<Pair<String, Long>>?>(null) }
-    LaunchedEffect(uri) {
-        withContext(Dispatchers.IO) {
-            try {
-                val out = ArrayList<Pair<String, Long>>()
-                ZipInputStream(ctx.contentResolver.openInputStream(uri)).use { z ->
-                    while (out.size < 5000) { val e = z.nextEntry ?: break; out.add(e.name to e.size); z.closeEntry() }
-                }
-                entries = out
-            } catch (e: Exception) { onFail() }
-        }
-    }
-    val list = entries
-    if (list == null) { Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentBlue) }; return }
-    LazyColumn(modifier.padding(horizontal = 12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-        item { Text("${list.size} entries", color = TextTertiary, fontSize = 12.sp, fontFamily = Mono, modifier = Modifier.padding(8.dp)) }
-        itemsIndexed(list) { _, (name, size) ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (name.endsWith("/")) Icons.Default.Folder else Icons.Default.InsertDriveFile, null, tint = if (name.endsWith("/")) AccentBlue else TextTertiary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(name, color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (size >= 0 && !name.endsWith("/")) Text(FileSystemEntry.formatBytes(size), color = TextTertiary, fontSize = 11.sp, fontFamily = Mono)
-            }
-        }
-    }
-}
-
 /** Card for formats VolumeX can't render itself (office documents, rar/7z/dmg, unknown types): hand them to another app. */
 @Composable
 fun OpenWithView(entry: FileSystemEntry, hint: String?, onOpen: () -> Unit, onShare: () -> Unit, modifier: Modifier = Modifier) {

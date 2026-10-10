@@ -349,6 +349,8 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boole
         ) {
             if (entry.fileType == FileType.VIDEO) {
                 VideoThumb(entry, Modifier.fillMaxSize())
+            } else if (entry.isRaw) {
+                RawImage(DriveFileProvider.buildUri(entry.inodeOid, entry.path), thumb = true, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else if (entry.fileType == FileType.IMAGE) {
                 AsyncImage(
                     model = ImageRequest.Builder(context).data(DriveFileProvider.buildUri(entry.inodeOid, entry.path)).size(360).crossfade(true).build(),
