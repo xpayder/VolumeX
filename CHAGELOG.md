@@ -16,7 +16,7 @@
 
 ### Changed
 - Renamed project to VolumeX
-- Renamed package to com.fatalpuppet.volumex
+- Renamed package to app.feldkit (FeldKit fork)
 
 ### Fixed
 - Package namespace issues

@@ -1,18 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The "F" is a drive bay: stem + two data lanes, the lower lane ends in an activity LED. -->
+<!-- A pocket drive with a USB-C plug and a mint activity light. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <path android:pathData="M46,21 H62 A4,4 0 0 1 66,25 V41 A4,4 0 0 1 62,45 H46 A4,4 0 0 1 42,41 V25 A4,4 0 0 1 46,21 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="42" android:startY="0" android:endX="66" android:endY="0" android:type="linear">
+                <item android:color="#FF8FA2AB" android:offset="0" />
+                <item android:color="#FFE9F0F3" android:offset="0.35" />
+                <item android:color="#FFB5C4CB" android:offset="0.7" />
+                <item android:color="#FF7F939C" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FF10222B" android:pathData="M49.75,26.5 H58.25 A3.25,3.25 0 0 1 61.5,29.75 V29.75 A3.25,3.25 0 0 1 58.25,33.0 H49.75 A3.25,3.25 0 0 1 46.5,29.75 V29.75 A3.25,3.25 0 0 1 49.75,26.5 Z" />
+    <path android:fillColor="#FF2B4650" android:pathData="M49.85,28.4 H58.15 A1.35,1.35 0 0 1 59.5,29.75 V29.749999999999996 A1.35,1.35 0 0 1 58.15,31.099999999999998 H49.85 A1.35,1.35 0 0 1 48.5,29.749999999999996 V29.75 A1.35,1.35 0 0 1 49.85,28.4 Z" />
+    <path android:pathData="M42,36 H66 V45 H42 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="0" android:startY="36" android:endX="0" android:endY="45" android:type="linear">
+                <item android:color="#00000000" android:offset="0" />
+                <item android:color="#61000000" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M45,40 H63 A11,11 0 0 1 74,51 V77 A11,11 0 0 1 63,88 H45 A11,11 0 0 1 34,77 V51 A11,11 0 0 1 45,40 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="34" android:startY="40" android:endX="70" android:endY="83" android:type="linear">
+                <item android:color="#FF3C6670" android:offset="0" />
+                <item android:color="#FF1D3A44" android:offset="0.45" />
+                <item android:color="#FF0D1E26" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
     <path
         android:fillColor="#00000000"
-        android:pathData="M73,33 H42 V76 M42,54 H62"
-        android:strokeColor="#FFF4F7F8"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="11" />
-    <path
-        android:fillColor="#FF5BE3C0"
-        android:pathData="M73.5,54 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
+        android:strokeWidth="1.2"
+        android:pathData="M45.0,40.6 H63.00000000000001 A10.4,10.4 0 0 1 73.4,51.0 V77.0 A10.4,10.4 0 0 1 63.00000000000001,87.4 H45.0 A10.4,10.4 0 0 1 34.6,77.0 V51.0 A10.4,10.4 0 0 1 45.0,40.6 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:startX="0" android:startY="40" android:endX="0" android:endY="88" android:type="linear">
+                <item android:color="#BFFFFFFF" android:offset="0" />
+                <item android:color="#1AFFFFFF" android:offset="0.55" />
+                <item android:color="#29FFFFFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FF5BE3C0" android:pathData="M46.2,75 H61.8 A2.2,2.2 0 0 1 64,77.2 V77.2 A2.2,2.2 0 0 1 61.8,79.4 H46.2 A2.2,2.2 0 0 1 44,77.2 V77.2 A2.2,2.2 0 0 1 46.2,75 Z" />
+    <path android:fillColor="#FF5BE3C0" android:pathData="M45.5,53.5 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0" />
 </vector>

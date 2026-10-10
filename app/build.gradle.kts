@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.fatalpuppet.volumex"
+    namespace = "app.feldkit"
     compileSdk = 37
 
     defaultConfig {
