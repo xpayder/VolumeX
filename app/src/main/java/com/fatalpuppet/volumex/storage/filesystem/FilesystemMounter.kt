@@ -62,7 +62,7 @@ object FilesystemMounter {
     private fun probeStarts(device: BlockDeviceReader, starts: List<Long>): List<MountedPartition> {
         val out = ArrayList<MountedPartition>()
         for (lba in starts.distinct()) {
-            val m = tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
+            val m = tryBitLocker(device, lba) ?: tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
                 ?: tryExFat(device, lba) ?: tryExt(device, lba)
             if (m != null) out.add(MountedPartition(m.first, m.second, lba))
         }
@@ -111,6 +111,17 @@ object FilesystemMounter {
         val header = HfsPlusVolumeHeaderParser.parse(sector) ?: return Pair(reader, null)
         return Pair(reader, HfsPlusWriter(device, lba, header))
     }
+
+    private fun tryBitLocker(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+        val reader = com.fatalpuppet.volumex.storage.filesystem.bitlocker.BitLockerReader(device, lba)
+        if (!reader.mount()) return null
+        Log.i(TAG, "BitLocker at LBA $lba")
+        return Pair(reader, null)   // read-only
+    }
+
+    /** Mounts the filesystem inside an unlocked container (starts at sector 0 of [device]); never a nested BitLocker. */
+    fun mountInner(device: BlockDeviceReader): Pair<FileSystemReader, FileSystemWriter?>? =
+        tryNtfs(device, 0) ?: tryExFat(device, 0)?.let { it.first to null } ?: tryFat32(device, 0)?.let { it.first to null } ?: tryHfsPlus(device, 0)?.let { it.first to null }
 
     private fun tryNtfs(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
         val reader = com.fatalpuppet.volumex.storage.filesystem.ntfs.NtfsReader(device, lba)

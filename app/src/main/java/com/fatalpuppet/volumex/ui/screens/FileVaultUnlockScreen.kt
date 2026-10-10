@@ -81,7 +81,7 @@ fun FileVaultUnlockScreen(
             Spacer(Modifier.height(22.dp))
             Text(volume.name.ifBlank { "Encrypted drive" }, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
-            Text("Encrypted with FileVault", color = TextTertiary, fontSize = 14.sp)
+            Text("Encrypted with ${volume.encryption.ifEmpty { "FileVault" }}", color = TextTertiary, fontSize = 14.sp)
             Spacer(Modifier.height(30.dp))
 
             OutlinedTextField(

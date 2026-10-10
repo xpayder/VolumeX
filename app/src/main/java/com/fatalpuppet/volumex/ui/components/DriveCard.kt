@@ -53,7 +53,7 @@ fun DriveCard(
                     Chip(volume.type.uppercase(), accent)
                     if (locked) Chip("LOCKED", AccentRed) else {
                         Chip(if (writable) "READ & WRITE" else "READ ONLY", if (writable) AccentGreen else AccentOrange)
-                        if (volume.isEncrypted) Chip("FILEVAULT", AccentGreen)
+                        if (volume.isEncrypted) Chip(volume.encryption.uppercase().ifEmpty { "ENCRYPTED" }, AccentGreen)
                     }
                 }
             }

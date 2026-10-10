@@ -137,7 +137,7 @@ class ApfsReader(
             // Locked FileVault volume: report it (name, size, counts live in the plain superblock) but expose no files.
             val lockedInfo = VolumeInfo(
                 name = volSb.volumeName, type = "APFS", uuid = volSb.volUuidString, totalBlocks = sb.blockCount,
-                blockSize = sb.blockSize, isEncrypted = true, numFiles = volSb.numFiles, numDirectories = volSb.numDirectories
+                blockSize = sb.blockSize, isEncrypted = true, encryption = "FileVault", numFiles = volSb.numFiles, numDirectories = volSb.numDirectories
             )
             return Volume(lockedInfo, volSb, emptyMap(), emptyMap())
         }
@@ -145,7 +145,7 @@ class ApfsReader(
 
         val info = VolumeInfo(
             name = volSb.volumeName, type = "APFS", uuid = volSb.volUuidString,
-            totalBlocks = sb.blockCount, blockSize = sb.blockSize, isEncrypted = volSb.isEncrypted,
+            totalBlocks = sb.blockCount, blockSize = sb.blockSize, isEncrypted = volSb.isEncrypted, encryption = if (volSb.isEncrypted) "FileVault" else "",
             numFiles = volSb.numFiles, numDirectories = volSb.numDirectories
         )
         return Volume(info, volSb, results.groupBy { it.parentOid }, results.associateBy { it.oid })
