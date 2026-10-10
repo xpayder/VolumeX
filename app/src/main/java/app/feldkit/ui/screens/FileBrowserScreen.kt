@@ -1,5 +1,6 @@
 package app.feldkit.ui.screens
 
+import kotlinx.coroutines.launch
 import app.feldkit.ui.components.OffloadCard
 import androidx.compose.ui.focus.focusRequester
 import app.feldkit.ui.components.getFileIconAndColor
@@ -109,7 +110,9 @@ fun FileBrowserScreen(
     var askDest by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
-    val driveName = remember { ActiveDriveSession.volumes.getOrNull(ActiveDriveSession.currentVolumeIndex)?.name?.takeIf { it.isNotBlank() } ?: "Drive" }
+    val imageLabel by viewModel.imageLabel.collectAsState()
+    val driveBase = remember { ActiveDriveSession.volumes.getOrNull(ActiveDriveSession.currentVolumeIndex)?.name?.takeIf { it.isNotBlank() } ?: "Drive" }
+    val driveName = imageLabel ?: driveBase
     val title = if (breadcrumbs.size > 1) breadcrumbs.last().name else driveName
     val visible = entries.filter { showHidden || !it.name.startsWith(".") }
 
@@ -124,9 +127,11 @@ fun FileBrowserScreen(
     }
     fun askDestination(items: List<FileSystemEntry>) { if (items.isNotEmpty()) { pendingCopy = items; askDest = true } }
 
+    val imageScope = rememberCoroutineScope()
     fun open(entry: FileSystemEntry) {
         when {
             entry.isDirectory -> viewModel.openEntry(entry)
+            entry.extension in ImageExt -> imageScope.launch { viewModel.openImage(entry)?.let { msg -> android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show(); onOpenPreview?.invoke(entry) } }
             entry.fileType == FileType.AUDIO -> AudioSession.play(context, entry, visible.filter { it.fileType == FileType.AUDIO && !it.isDirectory })
             else -> onOpenPreview?.invoke(entry)
         }
@@ -136,6 +141,7 @@ fun FileBrowserScreen(
             selected.isNotEmpty() -> viewModel.clearSelection()
             searchActive -> { searchActive = false; viewModel.search("") }
             breadcrumbs.size > 1 -> viewModel.navigateUp()
+            viewModel.inImage -> viewModel.leaveImage()
             else -> onNavigateBack()
         }
     }
@@ -486,6 +492,8 @@ private fun TextInputDialog(title: String, initial: String, confirm: String, onD
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }
     )
 }
+
+private val ImageExt = setOf("iso", "img", "dmg", "udf")
 
 /** Shares the selected files (folders are skipped: there is nothing to attach). */
 private fun shareMany(ctx: android.content.Context, items: List<FileSystemEntry>) {

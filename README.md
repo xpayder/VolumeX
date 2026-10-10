@@ -67,6 +67,9 @@ mount, SHA-256 comparison).
 | FileVault (APFS) | yes (password or recovery key) | no | verified against a volume encrypted by macOS (`filevault.img`, tests in `FileVaultTest`); opened read-only |
 | NTFS | yes | experimental | MFT, attribute lists, sparse + compressed (LZNT1) files, large directories; verified on an image made by `mkntfs`/ntfs-3g (`tools/make-ntfs-fixture.sh`). Write (off by default): create / rename / delete with MFT growth and B+tree index splits, refuses dirty or hibernated volumes; verified with ntfs-3g and `ntfsresize` (`tools/verify-ntfs.sh`), **not** with Windows chkdsk. Not readable: EFS-encrypted files |
 | BitLocker (Windows 7+, To Go) | yes (password or 48-digit recovery key) | no | XTS and CBC ciphers (not the Windows 7 diffuser mode); NTFS / exFAT / FAT32 inside; fixtures opened by cryptsetup and dislocker (`tools/make-bitlocker.py`) |
+| ISO 9660 (+ Joliet, Rock Ridge) | yes | no | optical images and installer sticks; open an `.iso` / `.img` from inside a drive and browse it without unpacking. Checked against images from `hdiutil` and `xorriso` (`tools/make-iso-fixtures.sh`, `tools/make-iso-rr.sh`) |
+| UDF | yes | no | DVD / Blu-ray images; plain and sparable partitions (not CD-RW virtual partitions). Checked against `hdiutil` images |
+| Apple disk images (.dmg) | yes | no | UDRO / UDZO (zlib) / UDBZ (bzip2) holding HFS+ (APM or GPT); LZFSE (ULFO / ULMO) is recognised but not supported yet |
 | LUKS / LVM | partial | no | unit-untested; treat as unverified |
 
 Write operations: add files (streamed), new folder, rename, delete (recursive). Multi-partition GPT/MBR

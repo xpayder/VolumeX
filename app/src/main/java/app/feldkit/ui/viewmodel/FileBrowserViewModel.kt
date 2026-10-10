@@ -114,6 +114,44 @@ class FileBrowserViewModel : ViewModel() {
         navigateTo("/")
     }
 
+    // ── disk images opened from inside a drive (.iso, .img, .dmg ...): the image becomes the browsed volume until you back out ──
+
+    private class Saved(val reader: FileSystemReader?, val writer: app.feldkit.storage.filesystem.FileSystemWriter?, val volume: Int, val path: String, val writable: Boolean, val label: String?)
+    private val imageStack = ArrayList<Saved>()
+    private val _imageLabel = MutableStateFlow<String?>(null)
+    /** Name of the image being browsed, or null when browsing the drive itself. */
+    val imageLabel: StateFlow<String?> = _imageLabel.asStateFlow()
+    val inImage: Boolean get() = imageStack.isNotEmpty()
+
+    /** Tries to open [entry] as a disk image. Returns null on success, otherwise a message to show. */
+    suspend fun openImage(entry: FileSystemEntry): String? = withContext(Dispatchers.IO) {
+        val r = reader ?: return@withContext "No drive"
+        val src: app.feldkit.storage.disk.ByteSource = app.feldkit.storage.disk.ReaderByteSource(r, entry)
+        val device: app.feldkit.storage.disk.BlockDeviceReader = try {
+            if (entry.extension == "dmg") (app.feldkit.storage.disk.DmgBlockDevice.open(src) ?: return@withContext "This is not a readable Apple disk image")
+            else app.feldkit.storage.disk.SourceBlockDevice(src)
+        } catch (e: app.feldkit.storage.disk.DmgBlockDevice.Unsupported) { return@withContext e.message ?: "Unsupported image" }
+        catch (e: Exception) { return@withContext "Cannot open the image: ${e.message}" }
+        val mounted = try { app.feldkit.storage.filesystem.FilesystemMounter.mountAll(device).firstOrNull() } catch (e: Exception) { null }
+            ?: return@withContext "No file system found inside this image"
+        imageStack.add(Saved(reader, ActiveDriveSession.writer, currentVolumeIndex, currentPath, _writable.value, _imageLabel.value))
+        reader = mounted.reader; currentVolumeIndex = 0
+        ActiveDriveSession.reader = mounted.reader; ActiveDriveSession.writer = null; ActiveDriveSession.currentVolumeIndex = 0
+        _writable.value = false
+        _imageLabel.value = entry.name
+        withContext(Dispatchers.Main) { _selectedEntries.value = emptySet(); navigateTo("/") }
+        null
+    }
+
+    fun leaveImage() {
+        val s = imageStack.removeLastOrNull() ?: return
+        reader = s.reader; currentVolumeIndex = s.volume
+        ActiveDriveSession.reader = s.reader; ActiveDriveSession.writer = s.writer; ActiveDriveSession.currentVolumeIndex = s.volume
+        _writable.value = s.writable; _imageLabel.value = s.label
+        _selectedEntries.value = emptySet()
+        navigateTo(s.path)
+    }
+
     fun navigateTo(path: String) {
         currentPath = path
         updateBreadcrumbs(path)
@@ -705,7 +743,7 @@ class FileBrowserViewModel : ViewModel() {
             }
 
             if (result != null) {
-                val filtered = if (_showHidden.value) result else result.filter { !it.name.startsWith(".") }
+                val filtered = if (_showHidden.value) result else result.filter { !it.name.startsWith(".") && it.name.trimStart('\u0000') != "HFS+ Private Data" && it.name != ".HFS+ Private Directory Data\r" }
                 _entries.value = sortEntries(filtered, _sortBy.value)
                 if (!viewModeChosenByUser) {
                     val files = filtered.filter { !it.isDirectory }

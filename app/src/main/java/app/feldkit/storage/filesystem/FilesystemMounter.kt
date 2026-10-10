@@ -65,8 +65,26 @@ object FilesystemMounter {
         val out = ArrayList<MountedPartition>()
         for (lba in starts.distinct()) {
             val m = tryBitLocker(device, lba) ?: tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
-                ?: tryExFat(device, lba) ?: tryExt(device, lba)
+                ?: tryExFat(device, lba) ?: tryExt(device, lba) ?: tryUdf(device, lba) ?: tryIso(device, lba)
             if (m != null) out.add(MountedPartition(m.first, m.second, lba))
+        }
+        return out
+    }
+
+    /** Apple Partition Map (classic Mac disks and many .dmg files): 'ER' driver record at sector 0, 'PM' entries from sector 1. */
+    private fun apmStarts(device: BlockDeviceReader): List<Long>? {
+        val s0 = device.readSector(0) ?: return null
+        if (s0[0] != 'E'.code.toByte() || s0[1] != 'R'.code.toByte()) return null
+        val first = device.readSector(1) ?: return null
+        if (first[0] != 'P'.code.toByte() || first[1] != 'M'.code.toByte()) return null
+        fun be32(b: ByteArray, o: Int) = ((b[o].toLong() and 0xFF) shl 24) or ((b[o + 1].toLong() and 0xFF) shl 16) or ((b[o + 2].toLong() and 0xFF) shl 8) or (b[o + 3].toLong() and 0xFF)
+        val count = be32(first, 4).toInt().coerceIn(1, 64)
+        val out = ArrayList<Long>()
+        for (i in 1..count) {
+            val e = device.readSector(i.toLong()) ?: break
+            if (e[0] != 'P'.code.toByte() || e[1] != 'M'.code.toByte()) break
+            val type = String(e, 48, 32, Charsets.US_ASCII).trimEnd('\u0000')
+            if (type.startsWith("Apple_HFS") || type.startsWith("Apple_APFS") || type == "Windows_FAT_32" || type == "Apple_UNIX_SVR2" || type == "Linux") out.add(be32(e, 8))
         }
         return out
     }
@@ -76,6 +94,7 @@ object FilesystemMounter {
     /** Partition start LBAs from the GPT (preferred) or the MBR; empty if the media is unpartitioned. */
     private fun partitionStarts(device: BlockDeviceReader): List<Long> {
         val mbr = device.readSector(0) ?: return emptyList()
+        apmStarts(device)?.let { if (it.isNotEmpty()) return it }
         val gptHeader = device.readSector(1)?.let { GptPartitionTable.parseHeader(it) }
         if (gptHeader != null) {
             val entryBytes = (gptHeader.partitionEntryCount * gptHeader.partitionEntrySize).coerceIn(0, 1 shl 20).toInt()
@@ -149,6 +168,20 @@ object FilesystemMounter {
         if (!reader.mount()) return null
         Log.i(TAG, "exFAT at LBA $lba")
         return Pair(reader, ExFatWriter(device, reader))
+    }
+
+    private fun tryUdf(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+        val reader = app.feldkit.storage.filesystem.udf.UdfReader(device, lba)
+        if (!reader.mount()) return null
+        Log.i(TAG, "UDF at LBA $lba")
+        return Pair(reader, null)
+    }
+
+    private fun tryIso(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+        val reader = app.feldkit.storage.filesystem.iso.Iso9660Reader(device, lba)
+        if (!reader.mount()) return null
+        Log.i(TAG, "ISO 9660 at LBA $lba")
+        return Pair(reader, null)   // optical images are read-only
     }
 
     private fun tryExt(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {

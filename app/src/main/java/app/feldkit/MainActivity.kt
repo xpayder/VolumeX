@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.FileBrowser -> when {
                             fileBrowserViewModel.selectedEntries.value.isNotEmpty() -> fileBrowserViewModel.clearSelection()
                             fileBrowserViewModel.breadcrumbs.value.size > 1 -> fileBrowserViewModel.navigateUp()
+                            fileBrowserViewModel.inImage -> fileBrowserViewModel.leaveImage()
                             else -> currentScreen = Screen.Home
                         }
                         is Screen.Settings -> currentScreen = settingsReturn
