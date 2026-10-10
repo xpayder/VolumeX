@@ -46,7 +46,7 @@ class FixtureFilesystemTest(private val name: String, private val expectedType: 
         @Parameterized.Parameters(name = "{0}")
         fun params() = listOf(
             arrayOf("apfs", "APFS"), arrayOf("hfs", "HFS+"),
-            arrayOf("exfat", "exFAT"), arrayOf("exfatbig", "exFAT"), arrayOf("fat32", "FAT32")
+            arrayOf("exfat", "exFAT"), arrayOf("exfatbig", "exFAT"), arrayOf("fat32", "FAT32"), arrayOf("ntfs", "NTFS")
         )
         private val dir = File(System.getProperty("fixtures.dir") ?: "build/fixtures")
     }
@@ -123,7 +123,7 @@ class FixtureFilesystemTest(private val name: String, private val expectedType: 
         val many = find(r, "many")
         assertNotNull(many)
         val n = r.listDirectory(0, many!!.path).count { it.name.startsWith("file_") }
-        assertEquals(300, n)
+        assertEquals(if (name == "ntfs") 600 else 300, n)
     }
 
 }

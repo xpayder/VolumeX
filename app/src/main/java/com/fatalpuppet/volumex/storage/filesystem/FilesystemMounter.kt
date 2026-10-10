@@ -62,7 +62,7 @@ object FilesystemMounter {
     private fun probeStarts(device: BlockDeviceReader, starts: List<Long>): List<MountedPartition> {
         val out = ArrayList<MountedPartition>()
         for (lba in starts.distinct()) {
-            val m = tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryFat32(device, lba)
+            val m = tryApfs(device, lba) ?: tryHfsPlus(device, lba) ?: tryNtfs(device, lba) ?: tryFat32(device, lba)
                 ?: tryExFat(device, lba) ?: tryExt(device, lba)
             if (m != null) out.add(MountedPartition(m.first, m.second, lba))
         }
@@ -110,6 +110,13 @@ object FilesystemMounter {
         val sector = device.readSector(headerSector) ?: return Pair(reader, null)
         val header = HfsPlusVolumeHeaderParser.parse(sector) ?: return Pair(reader, null)
         return Pair(reader, HfsPlusWriter(device, lba, header))
+    }
+
+    private fun tryNtfs(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+        val reader = com.fatalpuppet.volumex.storage.filesystem.ntfs.NtfsReader(device, lba)
+        if (!reader.mount()) return null
+        Log.i(TAG, "NTFS at LBA $lba")
+        return Pair(reader, null)   // read-only
     }
 
     private fun tryFat32(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
