@@ -297,7 +297,7 @@ private fun SettingsToggleRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = Accent, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = if (icon == Icons.Default.Warning) AccentOrange else Accent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontSize = 15.sp)
