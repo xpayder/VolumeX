@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,11 +46,12 @@ import java.util.zip.CRC32
 
 private val Mono = FontFamily.Monospace
 
-/** Hashes a file straight off the drive (MD5 / SHA-1 / SHA-256 / CRC32) so a copy can be verified against its source. */
+/** Hashes a file straight off the drive (xxHash, MD5, SHA family, C4, CRC32) so a copy can be verified against its source. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChecksumDialog(entry: FileSystemEntry, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
-    var algo by remember { mutableStateOf("SHA-256") }
+    var algo by remember { mutableStateOf(app.feldkit.hash.HashAlgo.SHA256) }
     var progress by remember { mutableFloatStateOf(0f) }
     var result by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -57,14 +60,13 @@ fun ChecksumDialog(entry: FileSystemEntry, onDismiss: () -> Unit) {
         withContext(Dispatchers.IO) {
             val reader = ActiveDriveSession.reader
             if (reader == null) { error = "Drive not available"; return@withContext }
-            val crc = CRC32()
-            val md = if (algo == "CRC32") null else MessageDigest.getInstance(algo)
+            val hasher = algo.create()
             val sink = object : OutputStream() {
-                override fun write(b: Int) { md?.update(b.toByte()) ?: crc.update(b) }
-                override fun write(b: ByteArray, off: Int, len: Int) { md?.update(b, off, len) ?: crc.update(b, off, len) }
+                override fun write(b: Int) { hasher.update(byteArrayOf(b.toByte()), 0, 1) }
+                override fun write(b: ByteArray, off: Int, len: Int) { hasher.update(b, off, len) }
             }
             val ok = reader.readFileTo(entry, sink) { done -> if (entry.size > 0) progress = (done.toFloat() / entry.size).coerceIn(0f, 1f) }
-            if (!ok) error = "Could not read the file" else result = if (md != null) md.digest().joinToString("") { "%02x".format(it) } else "%08x".format(crc.value)
+            if (!ok) { error = "Could not read the file"; hasher.release() } else { result = algo.format(hasher.digest()); hasher.release() }
         }
     }
     GlassDialog(
@@ -73,20 +75,20 @@ fun ChecksumDialog(entry: FileSystemEntry, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(entry.name, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("MD5", "SHA-1", "SHA-256", "CRC32").forEach { a ->
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    app.feldkit.hash.HashAlgo.values().forEach { a ->
                         Text(
-                            a, color = if (a == algo) DeepNavy else TextSecondary, fontSize = 12.sp, fontFamily = Mono,
+                            a.label, color = if (a == algo) DeepNavy else TextSecondary, fontSize = 12.sp, fontFamily = Mono,
                             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (a == algo) Accent else Color0x1F).clickable { algo = a }.padding(horizontal = 10.dp, vertical = 7.dp)
                         )
                     }
                 }
                 when {
                     error != null -> Text(error!!, color = AccentRed, fontSize = 13.sp)
-                    result == null -> { LinearProgressIndicator(progress = { progress }, color = Accent, trackColor = Fill2, modifier = Modifier.fillMaxWidth()); Text("${(progress * 100).toInt()}%", color = TextTertiary, fontSize = 11.sp, fontFamily = Mono) }
+                    result == null -> { LinearProgressIndicator(progress = { progress }, color = Accent, trackColor = Fill2, modifier = Modifier.fillMaxWidth()); Text("${(progress * 100).toInt()}%", color = TextTertiary, fontSize = 12.sp, fontFamily = Mono) }
                     else -> {
                         Text(result!!, color = TextPrimary, fontSize = 12.sp, fontFamily = Mono, lineHeight = 17.sp)
-                        TextButton(onClick = { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(algo, result)) }, contentPadding = PaddingValues(0.dp)) {
+                        TextButton(onClick = { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(algo.label, result)) }, contentPadding = PaddingValues(horizontal = 0.dp)) {
                             Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = Accent); Spacer(Modifier.width(6.dp)); Text("Copy", color = Accent)
                         }
                     }

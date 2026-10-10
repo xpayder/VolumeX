@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -137,6 +138,7 @@ class FileBrowserViewModel : ViewModel() {
         _selectedEntries.value = current
     }
 
+    fun selectAll(items: List<FileSystemEntry>) { _selectedEntries.value = items.map { it.path }.toSet() }
     fun clearSelection() {
         _selectedEntries.value = emptySet()
     }
@@ -530,6 +532,61 @@ class FileBrowserViewModel : ViewModel() {
             if (cv.manifest && manifest.isNotEmpty()) java.io.File(base, "FeldKit-${stamp()}.sha256").writeText(manifestText(manifest))
             val bad = progresses.count { it.error != null }
             say(if (bad == 0) (if (cv.verify) "Saved and verified in Downloads/FeldKit" else "Saved to Downloads/FeldKit") else "$bad file(s) failed - see the transfer list")
+            _selectedEntries.value = emptySet()
+        }
+    }
+
+    // ── Offload: one read from the drive, several places, checksums, read-back verification ──
+
+    sealed class DestSpec {
+        object Downloads : DestSpec()
+        data class Tree(val uri: Uri, val label: String) : DestSpec()
+    }
+
+    data class OffloadUi(
+        val fileIndex: Int, val fileCount: Int, val file: String, val phase: String,
+        val doneBytes: Long, val verifiedBytes: Long, val totalBytes: Long, val speedBps: Long,
+        val finished: Boolean, val cancelled: Boolean, val destLabels: List<String>,
+        val verifiedFiles: Int, val problems: List<String>, val verifying: Boolean,
+    )
+
+    private val _offload = MutableStateFlow<OffloadUi?>(null)
+    val offload: StateFlow<OffloadUi?> = _offload.asStateFlow()
+    private var offloadEngine: app.feldkit.offload.OffloadEngine? = null
+    fun cancelOffload() { offloadEngine?.cancel() }
+    fun dismissOffload() { if (offloadEngine == null || _offload.value?.finished == true) _offload.value = null }
+
+    fun startOffload(context: Context, items: List<FileSystemEntry>, specs: List<DestSpec>, algos: List<app.feldkit.hash.HashAlgo>, verify: Boolean, sidecar: Boolean) {
+        val r = reader ?: return
+        if (items.isEmpty() || specs.isEmpty() || offloadEngine != null) return
+        val used = HashSet<String>()
+        val dests = specs.mapIndexed { i, sp ->
+            when (sp) {
+                is DestSpec.Downloads -> app.feldkit.offload.FileDestination(java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "FeldKit"), "Downloads/FeldKit")
+                is DestSpec.Tree -> app.feldkit.offload.SafDestination(context.applicationContext, sp.uri, if (used.contains(sp.label)) "${sp.label} (${i + 1})" else sp.label)
+            }.also { used.add(it.label) }
+        }
+        val engine = app.feldkit.offload.OffloadEngine(r, currentVolumeIndex, dests, app.feldkit.offload.OffloadConfig(algos = algos.ifEmpty { listOf(app.feldkit.hash.HashAlgo.XXH64) }, verify = verify))
+        offloadEngine = engine
+        launchTransfer(context) {
+            fun publish(done: Boolean) {
+                val p = engine.progress
+                val sec = ((System.nanoTime() - p.startedNs) / 1e9).coerceAtLeast(0.001)
+                val res = p.results.toList()
+                _offload.value = OffloadUi(
+                    p.fileIndex, p.fileCount, p.currentFile, p.phase, p.doneBytes, p.verifiedBytes, p.totalBytes, (p.doneBytes / sec).toLong(), done, p.phase == "Cancelled",
+                    dests.map { it.label }, res.count { it.ok },
+                    res.filter { !it.ok }.flatMap { f -> if (f.error != null) listOf("${f.path}: ${f.error}") else f.perDest.filter { it.status == app.feldkit.offload.DestStatus.MISMATCH || it.status == app.feldkit.offload.DestStatus.ERROR }.map { "${f.path} (${it.destination}): ${it.message}" } },
+                    verify,
+                )
+            }
+            val poll = launch { while (isActive) { publish(false); kotlinx.coroutines.delay(250) } }
+            val results = try { engine.run(items) } finally { poll.cancel() }
+            if (sidecar) app.feldkit.offload.Sidecars.write(dests, null, algos.ifEmpty { listOf(app.feldkit.hash.HashAlgo.XXH64) }, results)
+            publish(true)
+            offloadEngine = null
+            val bad = results.count { !it.ok }
+            say(when { engine.progress.phase == "Cancelled" -> "Cancelled"; bad == 0 -> if (verify) "Saved and verified in ${dests.size} place${if (dests.size > 1) "s" else ""}" else "Saved"; else -> "$bad file(s) need attention" })
             _selectedEntries.value = emptySet()
         }
     }

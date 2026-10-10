@@ -141,19 +141,11 @@ fun SettingsScreen(
                                 enabled = !testing, shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = DeepNavy),
                                 onClick = {
-                                    testing = true; speedText = "Reading 64 MB straight from the drive…"
+                                    testing = true; speedText = "Reading straight from the drive with four command sizes…"
                                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                         val dev = app.feldkit.storage.ActiveDriveSession.device as? app.feldkit.storage.usb.UsbBlockDeviceReader
                                         val msg = if (dev == null) "Connect a USB drive first - the test reads directly from the drive." else {
-                                            val saved = app.feldkit.storage.usb.UsbTuning.fastReads
-                                            app.feldkit.storage.usb.UsbTuning.fastReads = false
-                                            val a = dev.measureReadSpeed(64)
-                                            app.feldkit.storage.usb.UsbTuning.fastReads = true
-                                            val b = dev.measureReadSpeed(64)
-                                            val fastWorked = app.feldkit.storage.usb.UsbTuning.fastReads
-                                            app.feldkit.storage.usb.UsbTuning.fastReads = saved && fastWorked
-                                            if (a == null) "The drive is too small or could not be read for a test."
-                                            else "Standard: %.0f MB/s".format(a) + (if (b != null && fastWorked) "  ·  Fast: %.0f MB/s".format(b) else "  ·  Fast mode did not work on this drive (kept off)")
+                                            dev.speedReport(32)
                                         }
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { speedText = msg; testing = false }
                                     }

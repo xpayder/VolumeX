@@ -758,6 +758,36 @@ class UsbBlockDeviceReader(
         return megabytes / sec
     }
 
+    /**
+     * Diagnostic read test: reads [megabytes] MB from the middle of the disk with several command sizes and says, for each,
+     * the speed or exactly why it failed (USB status text and SCSI sense). Used by Settings > Drive speed.
+     */
+    @Synchronized
+    fun speedReport(megabytes: Int = 32): String {
+        val executor = scsiExecutor ?: return "No USB transport is active."
+        val total = sectorCount()
+        val sectors = megabytes * 2048
+        val sb = StringBuilder("Drive reports %.1f GB (%d sectors)\n".format(total * 512.0 / 1e9, total))
+        if (total < sectors * 2L + 8192) return sb.append("That is too small for a ${megabytes} MB test.").toString()
+        val start = (total / 2) - (total / 2) % 8
+        for (cmd in intArrayOf(64, 256, 1024, 2048)) {
+            var done = 0; var err: String? = null
+            val t0 = System.nanoTime()
+            while (done < sectors) {
+                val n = minOf(cmd, sectors - done)
+                val tr = try { executor.read10(lba = start + done, blockCount = n, blockSize = 512) } catch (e: Exception) { err = "exception ${e.javaClass.simpleName}: ${e.message} at +${done / 2048} MB"; break }
+                val d = tr.data
+                if (!tr.success || d == null || d.size < n * 512) { err = "${tr.message} (got ${d?.size ?: 0} of ${n * 512} bytes) at +${done / 2048} MB"; break }
+                done += n
+            }
+            val sec = (System.nanoTime() - t0) / 1e9
+            sb.append("%5d KB per command: ".format(cmd / 2))
+            if (err == null) sb.append("%.0f MB/s\n".format(megabytes / sec)) else { sb.append("FAILED - $err\n"); try { executor.resetRecovery(ifaceId()) } catch (_: Exception) {} }
+        }
+        Log.i(TAG, "speed report:\n$sb")
+        return sb.toString().trimEnd()
+    }
+
     @Synchronized
     override fun readSector(lba: Long): ByteArray? {
         val chunk = lba / chunkSectors

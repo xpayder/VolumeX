@@ -18,6 +18,13 @@ android {
         // libVLC ships native libraries for every ABI (80 MB); phones that matter here are arm64
         ndk { abiFilters += "arm64-v8a" }
     }
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     buildTypes {
         release {

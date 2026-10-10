@@ -283,6 +283,18 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra("vx_import")?.let { path ->
             fileBrowserViewModel.importUris(this, listOf(android.net.Uri.fromFile(java.io.File(path))))
         }
+        // Hash a file with every algorithm and log it (debug automation, checked against xxhsum / shasum): --es vx_hash <path>
+        intent?.getStringExtra("vx_hash")?.let { path ->
+            Thread {
+                val f = java.io.File(path)
+                val mh = app.feldkit.hash.MultiHasher(app.feldkit.hash.HashAlgo.values().toList())
+                val t0 = System.nanoTime()
+                f.inputStream().buffered(1 shl 20).use { ins -> val b = ByteArray(1 shl 20); while (true) { val n = ins.read(b); if (n <= 0) break; mh.update(b, 0, n) } }
+                val ms = (System.nanoTime() - t0) / 1_000_000
+                for ((a, h) in mh.finishHex()) Log.i("FeldKitHash", "${a.name}=$h")
+                Log.i("FeldKitHash", "done ${f.length()} bytes in $ms ms")
+            }.start()
+        }
         // Navigate the browser (debug automation): --es vx_cd /folder
         intent?.getStringExtra("vx_cd")?.let { fileBrowserViewModel.navigateTo(it) }
     }

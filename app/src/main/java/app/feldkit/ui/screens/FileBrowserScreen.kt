@@ -1,5 +1,6 @@
 package app.feldkit.ui.screens
 
+import app.feldkit.ui.components.OffloadCard
 import androidx.compose.ui.focus.focusRequester
 import app.feldkit.ui.components.getFileIconAndColor
 import kotlinx.coroutines.delay
@@ -10,6 +11,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,6 +86,7 @@ fun FileBrowserScreen(
     val selected by viewModel.selectedEntries.collectAsState()
     val sortBy by viewModel.sortBy.collectAsState()
     val transferProgress by viewModel.transferProgress.collectAsState()
+    val offload by viewModel.offload.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
     val showHidden by viewModel.showHidden.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -154,11 +159,7 @@ fun FileBrowserScreen(
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                     )
                     if (selected.isNotEmpty()) {
-                        IconButton(onClick = { askDestination(viewModel.entriesByPaths(selected)) }) { Icon(Icons.Default.Download, "Save to phone", tint = TextSecondary) }
-                        if (writable) {
-                            IconButton(onClick = { viewModel.setClipboard(viewModel.entriesByPaths(selected), false); viewModel.clearSelection() }) { Icon(Icons.Default.ContentCopy, "Copy", tint = TextSecondary) }
-                            IconButton(onClick = { deleteTargets = viewModel.entriesByPaths(selected) }) { Icon(Icons.Default.Delete, "Delete", tint = AccentRed) }
-                        }
+                        IconButton(onClick = { viewModel.selectAll(visible) }) { Icon(Icons.Default.SelectAll, "Select all", tint = TextSecondary) }
                     } else {
                         IconButton(onClick = { viewModel.toggleViewMode() }) {
                             Icon(if (viewMode == ViewMode.GRID) Icons.Default.ViewList else Icons.Default.GridView, "View", tint = TextSecondary)
@@ -203,6 +204,7 @@ fun FileBrowserScreen(
                 BrowserSearchField(searchQuery, { viewModel.search(it) }, { searchActive = false; viewModel.search("") })
             }
 
+            offload?.let { OffloadCard(it, onCancel = { viewModel.cancelOffload() }, onClose = { viewModel.dismissOffload() }) }
             if (transferProgress.isNotEmpty()) {
                 transferProgress.takeLast(3).forEach { TransferProgressCard(progress = it, onCancel = { viewModel.clearTransferProgress() }) }
             }
@@ -229,7 +231,7 @@ fun FileBrowserScreen(
                     }
                     else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         items(items, key = { it.path }) { e ->
-                            FileListItem(entry = e, isSelected = selected.contains(e.path), highlight = AudioSession.currentPath == e.path, onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
+                            FileListItem(entry = e, isSelected = selected.contains(e.path), highlight = AudioSession.currentPath == e.path, onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e }, onIconClick = { viewModel.toggleSelection(e) })
                         }
                     }
                 }
@@ -246,36 +248,53 @@ fun FileBrowserScreen(
             )
         }
 
-        // ── floating action pill ─────────────────────────────────────────────
-        if (writable && selected.isEmpty() && !searchActive) {
-            Row(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).liquidGlass(hazeState, RoundedCornerShape(28.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                if (clipboard != null) {
-                    PillAction(Icons.Default.ContentPaste, "Paste (${clipboard!!.entries.size})") { viewModel.pasteHere() }
-                    PillAction(Icons.Default.Close, "Cancel") { viewModel.clearClipboard() }
-                } else {
-                    PillAction(Icons.Default.CreateNewFolder, "New folder") { showNewFolder = true }
-                    PillAction(Icons.Default.UploadFile, "Upload files") { importLauncher.launch(arrayOf("*/*")) }
-                    PillAction(Icons.Default.DriveFolderUpload, "Upload folder") { uploadTreeLauncher.launch(null) }
+        // ── contextual action bar: what you can do depends on what is selected ──────────────────────
+        val barMode = when {
+            selected.isNotEmpty() -> 1
+            clipboard != null && writable -> 2
+            writable && !searchActive -> 3
+            else -> 0
+        }
+        AnimatedVisibility(
+            visible = barMode != 0, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp),
+            enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 2 }, exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 2 }
+        ) {
+            AnimatedContent(targetState = barMode.coerceAtLeast(1), transitionSpec = { fadeIn(tween(200, delayMillis = 60)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false) }, label = "actionBar") { mode ->
+                Row(
+                    Modifier.liquidGlass(hazeState, RoundedCornerShape(28.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    when (mode) {
+                        1 -> {
+                            val picked = viewModel.entriesByPaths(selected)
+                            PillAction(Icons.Default.Download, "Save") { askDestination(picked) }
+                            if (writable) {
+                                PillAction(Icons.Default.ContentCopy, "Copy") { viewModel.setClipboard(picked, false); viewModel.clearSelection() }
+                                PillAction(Icons.Default.ContentCut, "Move") { viewModel.setClipboard(picked, true); viewModel.clearSelection() }
+                            }
+                            PillAction(Icons.Default.Share, "Share") { shareMany(context, picked) }
+                            if (writable) PillAction(Icons.Default.Delete, "Delete", tint = AccentRed) { deleteTargets = picked }
+                        }
+                        2 -> {
+                            PillAction(Icons.Default.ContentPaste, "Paste (${clipboard?.entries?.size ?: 0})") { viewModel.pasteHere() }
+                            PillAction(Icons.Default.Close, "Cancel") { viewModel.clearClipboard() }
+                        }
+                        else -> {
+                            PillAction(Icons.Default.CreateNewFolder, "New folder") { showNewFolder = true }
+                            PillAction(Icons.Default.UploadFile, "Upload files") { importLauncher.launch(arrayOf("*/*")) }
+                            PillAction(Icons.Default.DriveFolderUpload, "Upload folder") { uploadTreeLauncher.launch(null) }
+                        }
+                    }
                 }
             }
         }
 
         // ── dialogs ──────────────────────────────────────────────────────────
         if (askDest) {
-            GlassDialog(
-                onDismissRequest = { askDest = false; pendingCopy = emptyList() },
-                title = { Text("Save to phone", color = TextPrimary) },
-                text = {
-                    Column {
-                        SheetRow(Icons.Default.Download, "Downloads / FeldKit") { askDest = false; viewModel.copyToDownloads(context, pendingCopy); pendingCopy = emptyList() }
-                        SheetRow(Icons.Default.FolderOpen, "Choose another folder…") { askDest = false; saveTreeLauncher.launch(null) }
-                        Text("Android's folder picker cannot pick Downloads or the storage root, so use the first option for those.", color = TextTertiary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
-                },
-                confirmButton = {}, dismissButton = { TextButton(onClick = { askDest = false; pendingCopy = emptyList() }) { Text("Cancel", color = TextTertiary) } }
+            SaveToPhoneDialog(
+                itemCount = pendingCopy.size,
+                onDismiss = { askDest = false; pendingCopy = emptyList() },
+                onStart = { specs, algos, verify, sidecar -> askDest = false; viewModel.startOffload(context, pendingCopy, specs, algos, verify, sidecar); pendingCopy = emptyList() }
             )
         }
         if (showNewFolder) TextInputDialog("New folder", "", "Create", { showNewFolder = false }) { viewModel.createFolder(it); showNewFolder = false }
@@ -344,7 +363,7 @@ fun FileBrowserScreen(
 // ── pieces ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color = Accent, onClick: () -> Unit) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.92f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 500f), label = "press")
@@ -352,8 +371,8 @@ private fun PillAction(icon: androidx.compose.ui.graphics.vector.ImageVector, la
         Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(RoundedCornerShape(20.dp)).clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, null, tint = Accent, modifier = Modifier.size(22.dp))
-        Text(label, color = TextPrimary, fontSize = 11.sp, maxLines = 1)
+        Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+        Text(label, color = if (tint == Accent) TextPrimary else tint, fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -466,6 +485,20 @@ private fun TextInputDialog(title: String, initial: String, confirm: String, onD
         confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text) }) { Text(confirm, color = Accent) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextTertiary) } }
     )
+}
+
+/** Shares the selected files (folders are skipped: there is nothing to attach). */
+private fun shareMany(ctx: android.content.Context, items: List<FileSystemEntry>) {
+    val files = items.filter { !it.isDirectory }
+    if (files.isEmpty()) { android.widget.Toast.makeText(ctx, "Folders can't be shared; open them and select files", android.widget.Toast.LENGTH_SHORT).show(); return }
+    val uris = ArrayList<android.net.Uri>(files.map { app.feldkit.provider.DriveFileProvider.buildUri(it.inodeOid, it.path) })
+    val single = files.size == 1
+    val i = android.content.Intent(if (single) android.content.Intent.ACTION_SEND else android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+        type = if (single) mimeOf(files[0]) else "*/*"
+        if (single) putExtra(android.content.Intent.EXTRA_STREAM, uris[0]) else putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    ctx.startActivity(android.content.Intent.createChooser(i, "Share"))
 }
 
 private fun mimeOf(e: FileSystemEntry): String = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(e.extension) ?: "*/*"

@@ -40,7 +40,9 @@ fun FileListItem(
     isSelected: Boolean = false,
     highlight: Boolean = false,
     onClick: () -> Unit = {},
-    onLongClick: () -> Unit = {}
+    onLongClick: () -> Unit = {},
+    /** Tap on the icon tile: toggles the selection (the row itself opens the item). */
+    onIconClick: (() -> Unit)? = null,
 ) {
     val bgColor by animateColorAsState(
         targetValue = if (isSelected) GlassWhite16 else if (highlight) Accent.copy(alpha = 0.09f) else Color.Transparent,
@@ -61,7 +63,7 @@ fun FileListItem(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = if (highlight) 8.dp else 16.dp, top = 12.dp, bottom = if (highlight) 2.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (highlight) AudioPlayButton() else FileIconBox(entry)
+            if (highlight) AudioPlayButton() else FileIconBox(entry, isSelected, onIconClick)
 
             Spacer(Modifier.width(12.dp))
 
@@ -92,25 +94,18 @@ fun FileListItem(
 }
 
 @Composable
-private fun FileIconBox(entry: FileSystemEntry) {
+private fun FileIconBox(entry: FileSystemEntry, selected: Boolean, onClick: (() -> Unit)?) {
     val (icon, tint) = getFileIconAndColor(entry)
     Box(
         modifier = Modifier
             .size(42.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(tint.copy(alpha = 0.25f), tint.copy(alpha = 0.12f))
-                )
-            ),
+            .background(if (selected) Brush.verticalGradient(listOf(Accent, Accent)) else Brush.verticalGradient(listOf(tint.copy(alpha = 0.25f), tint.copy(alpha = 0.12f))))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(22.dp)
-        )
+        if (selected) Icon(Icons.Default.Check, "Selected", tint = DeepNavy, modifier = Modifier.size(24.dp))
+        else Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
