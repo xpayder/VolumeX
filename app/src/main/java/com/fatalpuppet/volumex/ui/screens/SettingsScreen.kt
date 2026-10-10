@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -138,6 +139,47 @@ fun SettingsScreen(
                             checked = manifest,
                             onToggle = { manifest = !manifest; tprefs.edit().putBoolean("write_manifest", manifest).apply() }
                         )
+                    }
+                }
+                item {
+                    val sprefs = remember { context.getSharedPreferences("vx_prefs", android.content.Context.MODE_PRIVATE) }
+                    var fast by remember { mutableStateOf(sprefs.getBoolean("fast_usb", false)) }
+                    var speedText by remember { mutableStateOf<String?>(null) }
+                    var testing by remember { mutableStateOf(false) }
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    SettingsSection(title = "Drive speed") {
+                        SettingsToggleRow(
+                            icon = Icons.Default.Speed,
+                            title = "Fast USB reads (beta)",
+                            subtitle = "Keeps several USB requests in flight instead of one at a time. If your drive misbehaves it switches itself off. Run the speed test to see whether it helps on your drive.",
+                            checked = fast,
+                            onToggle = { fast = !fast; sprefs.edit().putBoolean("fast_usb", fast).apply(); com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads = fast }
+                        )
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Button(
+                                enabled = !testing, shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = DeepNavy),
+                                onClick = {
+                                    testing = true; speedText = "Reading 64 MB straight from the drive…"
+                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        val dev = com.fatalpuppet.volumex.storage.ActiveDriveSession.device as? com.fatalpuppet.volumex.storage.usb.UsbBlockDeviceReader
+                                        val msg = if (dev == null) "Connect a USB drive first - the test reads directly from the drive." else {
+                                            val saved = com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads
+                                            com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads = false
+                                            val a = dev.measureReadSpeed(64)
+                                            com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads = true
+                                            val b = dev.measureReadSpeed(64)
+                                            val fastWorked = com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads
+                                            com.fatalpuppet.volumex.storage.usb.UsbTuning.fastReads = saved && fastWorked
+                                            if (a == null) "The drive is too small or could not be read for a test."
+                                            else "Standard: %.0f MB/s".format(a) + (if (b != null && fastWorked) "  ·  Fast: %.0f MB/s".format(b) else "  ·  Fast mode did not work on this drive (kept off)")
+                                        }
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { speedText = msg; testing = false }
+                                    }
+                                }
+                            ) { Text(if (testing) "Testing…" else "Run drive speed test", fontWeight = FontWeight.SemiBold) }
+                            speedText?.let { Text(it, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp)) }
+                        }
                     }
                 }
                 item {

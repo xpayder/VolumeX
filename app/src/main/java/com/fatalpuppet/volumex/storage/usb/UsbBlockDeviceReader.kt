@@ -687,6 +687,7 @@ class UsbBlockDeviceReader(
     }
 
     override fun close() {
+        transport?.closePool()
         if (claimed) {
             massStorage?.let {
                 connection?.releaseInterface(
@@ -710,20 +711,51 @@ class UsbBlockDeviceReader(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 512
     }
     private val chunkSectors = 8
-    private val maxTransferSectors = 256   // 128 KB per SCSI command
+
+    private fun ifaceId() = massStorage?.usbInterface?.id ?: 0
+
+    /** Rejected large command: remember to stay at 128 KB per command from now on and reset the BOT state. */
+    private fun fallBackToSmallCommands(executor: com.fatalpuppet.volumex.storage.scsi.ScsiExecutor) {
+        Log.w(TAG, "drive rejected a ${UsbTuning.maxCommandSectors}-sector command; using ${UsbTuning.SAFE_COMMAND_SECTORS}")
+        UsbTuning.maxCommandSectors = UsbTuning.SAFE_COMMAND_SECTORS
+        executor.resetRecovery(ifaceId())
+    }
 
     private fun rawRead(lba: Long, count: Int): ByteArray? {
         val executor = scsiExecutor ?: return null
         val out = ByteArray(count * 512)
         var done = 0
         while (done < count) {
-            val n = minOf(maxTransferSectors, count - done)
-            val data = executor.read10(lba = lba + done, blockCount = n, blockSize = 512).data ?: return null
-            if (data.size < n * 512) return null
+            var n = minOf(UsbTuning.maxCommandSectors, count - done)
+            var data = executor.read10(lba = lba + done, blockCount = n, blockSize = 512).data
+            if ((data == null || data.size < n * 512) && n > UsbTuning.SAFE_COMMAND_SECTORS) {
+                fallBackToSmallCommands(executor)
+                n = minOf(UsbTuning.SAFE_COMMAND_SECTORS, count - done)
+                data = executor.read10(lba = lba + done, blockCount = n, blockSize = 512).data
+            }
+            if (data == null || data.size < n * 512) return null
             System.arraycopy(data, 0, out, done * 512, n * 512)
             done += n
         }
         return out
+    }
+
+    /** Sequential read speed of the drive in MB/s over [megabytes] MB taken from the middle of the disk (not a filesystem test). */
+    @Synchronized
+    fun measureReadSpeed(megabytes: Int): Double? {
+        val total = sectorCount()
+        val sectors = megabytes * 2048
+        if (total < sectors * 2L) return null
+        val start = (total / 2) - (total / 2) % 8
+        val t0 = System.nanoTime()
+        var done = 0
+        while (done < sectors) {
+            val n = minOf(2048, sectors - done)
+            rawRead(start + done, n) ?: return null
+            done += n
+        }
+        val sec = (System.nanoTime() - t0) / 1e9
+        return megabytes / sec
     }
 
     @Synchronized
@@ -763,8 +795,13 @@ class UsbBlockDeviceReader(
         val total = data.size / 512
         var done = 0
         while (done < total) {
-            val n = minOf(maxTransferSectors, total - done)
-            val r = executor.write10(lba = startLba + done, data = data.copyOfRange(done * 512, (done + n) * 512), blockSize = 512)
+            var n = minOf(UsbTuning.maxCommandSectors, total - done)
+            var r = executor.write10(lba = startLba + done, data = data.copyOfRange(done * 512, (done + n) * 512), blockSize = 512)
+            if (!r.success && n > UsbTuning.SAFE_COMMAND_SECTORS) {
+                fallBackToSmallCommands(executor)
+                n = minOf(UsbTuning.SAFE_COMMAND_SECTORS, total - done)
+                r = executor.write10(lba = startLba + done, data = data.copyOfRange(done * 512, (done + n) * 512), blockSize = 512)
+            }
             if (!r.success) { invalidate(startLba, total); return false }
             done += n
         }

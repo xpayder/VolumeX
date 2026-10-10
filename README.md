@@ -94,6 +94,9 @@ app/
 - USB-C cable or USB-OTG adapter; large bus-powered drives may need a powered hub
 - No root, no Mac, no account required
 
+## Credits
+See [CREDITS.md](CREDITS.md).
+
 ## License
 
 See [LICENSE](LICENSE).

@@ -34,6 +34,9 @@ class ScsiExecutor(
         )
     }
 
+    /** BOT reset recovery after a failed command, so the next one starts from a clean state. */
+    fun resetRecovery(interfaceNumber: Int) = transport.resetRecovery(interfaceNumber)
+
     /** REQUEST SENSE: clears a pending UNIT ATTENTION / reports why the last command failed. */
     fun requestSense(): ScsiTransaction {
         val command = ScsiCommand.requestSense(18)
@@ -98,23 +101,6 @@ class ScsiExecutor(
             lun = 0,
             commandLength = command.size.toByte(),
             command = command
-        )
-
-        Log.d(
-            "VolumeX",
-            "READ(10) CDB = ${
-                cbw.command.joinToString(" ") {
-                    "%02X".format(it)
-                }
-            }"
-        )
-
-        Log.d(
-            "VolumeX",
-            "READ(10) CBW tag=${cbw.tag} " +
-                    "transferLength=${cbw.dataTransferLength} " +
-                    "flags=%02X".format(cbw.flags) +
-                    " commandLength=${cbw.commandLength}"
         )
 
         return execute(

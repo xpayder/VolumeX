@@ -12,7 +12,7 @@ class BulkOnlyTransport(
     /** DATA IN: send CBW, receive data, receive CSW. */
     fun execute(cbw: ByteArray, expectedLength: Int): BulkOnlyResult {
         try {
-            Log.d(TAG, "Sending CBW: ${cbw.size} bytes")
+            if (UsbTuning.verbose) Log.d(TAG, "Sending CBW: ${cbw.size} bytes")
             val sendResult = transport.send(cbw)
             if (!sendResult.success) {
                 return BulkOnlyResult(false, null, "CBW send failed")
@@ -43,7 +43,7 @@ class BulkOnlyTransport(
 
             val csw = cswResult.data ?: return BulkOnlyResult(false, null, "No CSW data")
             val status = csw[12]
-            Log.d(TAG, "CSW status: $status")
+            if (UsbTuning.verbose) Log.d(TAG, "CSW status: $status")
 
             if (status != 0x00.toByte()) {
                 return BulkOnlyResult(false, data, "CSW status = $status")
@@ -60,13 +60,13 @@ class BulkOnlyTransport(
     /** DATA OUT: send CBW, send dataOut, receive CSW. */
     fun executeDataOut(cbw: ByteArray, dataOut: ByteArray): BulkOnlyResult {
         try {
-            Log.d(TAG, "Sending WRITE CBW: ${cbw.size} bytes")
+            if (UsbTuning.verbose) Log.d(TAG, "Sending WRITE CBW: ${cbw.size} bytes")
             val sendCbw = transport.send(cbw)
             if (!sendCbw.success) {
                 return BulkOnlyResult(false, null, "WRITE CBW send failed")
             }
 
-            Log.d(TAG, "Sending data OUT: ${dataOut.size} bytes")
+            if (UsbTuning.verbose) Log.d(TAG, "Sending data OUT: ${dataOut.size} bytes")
             val sendData = transport.send(dataOut)
             if (!sendData.success) {
                 return BulkOnlyResult(false, null, "WRITE data send failed")
@@ -79,7 +79,7 @@ class BulkOnlyTransport(
 
             val csw = cswResult.data ?: return BulkOnlyResult(false, null, "No WRITE CSW data")
             val status = csw[12]
-            Log.d(TAG, "WRITE CSW status: $status")
+            if (UsbTuning.verbose) Log.d(TAG, "WRITE CSW status: $status")
 
             return if (status == 0x00.toByte()) {
                 BulkOnlyResult(true, null, "WRITE OK")
