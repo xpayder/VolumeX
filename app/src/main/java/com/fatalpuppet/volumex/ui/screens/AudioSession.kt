@@ -5,6 +5,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +51,7 @@ object AudioSession {
         if (currentPath == entry.path) { state?.toggle(); return }
         val st = state ?: PlayerState(ExoPlayer.Builder(ctx.applicationContext).build().apply {
             setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+            pauseAtEndOfMediaItems = true   // a finished track stops; it never rolls on into the next file
         }).also { state = it; detach = it.attach { id -> if (id != null) currentPath = id } }
         val list = files.ifEmpty { listOf(entry) }
         queue = list
@@ -63,50 +68,59 @@ object AudioSession {
     }
 }
 
-/** Slim transport block shown under the playing file (list view) or under the header (grid view). */
+/** The file icon tile of the playing row becomes this play / pause button. */
 @Composable
-fun AudioMiniControls(modifier: Modifier = Modifier, showTitle: Boolean = false) {
+fun AudioPlayButton(modifier: Modifier = Modifier) {
     val s = AudioSession.player ?: return
-    var dragging by remember { mutableStateOf(false) }
-    var dragPos by remember { mutableFloatStateOf(0f) }
-    var speedMenu by remember { mutableStateOf(false) }
-    LaunchedEffect(s) { while (isActive) { s.position = s.player.currentPosition; delay(250) } }
-    val shown = if (dragging) dragPos else s.position.toFloat()
-    val hasPrev = s.player.hasPreviousMediaItem(); val hasNext = s.player.hasNextMediaItem()
-    Column(
-        modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xE60F151C)).border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(18.dp)).padding(horizontal = 10.dp, vertical = 6.dp)
+    Box(
+        modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(AccentBlue).clickable { s.toggle() },
+        contentAlignment = Alignment.Center
     ) {
-        if (showTitle) Text(AudioSession.current?.name ?: "", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp, top = 2.dp))
-        if (s.error != null) Text(s.error!!, color = AccentOrange, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(fmt(shown.toLong()), color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(44.dp))
-            Slider(
-                value = shown.coerceIn(0f, s.duration.coerceAtLeast(1).toFloat()),
-                onValueChange = { dragging = true; dragPos = it }, onValueChangeFinished = { s.seekTo(dragPos.toLong()); dragging = false },
-                valueRange = 0f..s.duration.coerceAtLeast(1).toFloat(), modifier = Modifier.weight(1f).height(28.dp),
-                colors = SliderDefaults.colors(thumbColor = TextPrimary, activeTrackColor = AccentBlue, inactiveTrackColor = Color(0x40FFFFFF))
-            )
-            Text(fmt(s.duration), color = TextTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(44.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                Text(
-                    "${if (s.speed % 1f == 0f) s.speed.toInt().toString() else s.speed.toString()}x", color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x1FFFFFFF)).clickable { speedMenu = true }.padding(horizontal = 9.dp, vertical = 6.dp)
+        if (s.buffering && !s.playing) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        else Icon(if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (s.playing) "Pause" else "Play", tint = DeepNavy, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** "00:12 / 03:40" for the row's second line. */
+@Composable
+fun AudioTimeText(modifier: Modifier = Modifier) {
+    val s = AudioSession.player ?: return
+    LaunchedEffect(s) { while (isActive) { s.position = s.player.currentPosition; delay(250) } }
+    Text("${fmt(s.position)} / ${fmt(s.duration)}", color = TextSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = modifier)
+}
+
+/** Hairline seek bar along the bottom edge of the playing row: tap or drag to seek. */
+@Composable
+fun AudioSeekLine(modifier: Modifier = Modifier) {
+    val s = AudioSession.player ?: return
+    var width by remember { mutableIntStateOf(1) }
+    var drag by remember { mutableStateOf<Float?>(null) }
+    val frac = drag ?: if (s.duration > 0) (s.position.toFloat() / s.duration).coerceIn(0f, 1f) else 0f
+    Box(
+        modifier.fillMaxWidth().height(20.dp)
+            .onSizeChanged { width = it.width.coerceAtLeast(1) }
+            .pointerInput(s) { detectTapGestures { o -> s.seekTo((o.x / width * s.duration).toLong()) } }
+            .pointerInput(s) {
+                detectHorizontalDragGestures(
+                    onDragStart = { o -> drag = (o.x / width).coerceIn(0f, 1f) },
+                    onHorizontalDrag = { c, _ -> drag = (c.position.x / width).coerceIn(0f, 1f) },
+                    onDragEnd = { drag?.let { f -> s.seekTo((f * s.duration).toLong()) }; drag = null },
+                    onDragCancel = { drag = null }
                 )
-                DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }, modifier = Modifier.background(DarkCard)) {
-                    listOf(0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp -> DropdownMenuItem(text = { Text("${sp}x", color = if (sp == s.speed) AccentBlue else TextPrimary) }, onClick = { s.changeSpeed(sp); speedMenu = false }) }
-                }
-            }
-            IconButton(onClick = { s.player.seekToPreviousMediaItem() }, enabled = hasPrev, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.SkipPrevious, "Previous", tint = if (hasPrev) TextPrimary else TextDisabled) }
-            IconButton(onClick = { s.seekBy(-10_000) }, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Replay10, "Back 10 s", tint = TextPrimary) }
-            Box(Modifier.size(42.dp).clip(CircleShape).background(AccentBlue).clickable { s.toggle() }, contentAlignment = Alignment.Center) {
-                if (s.buffering && !s.playing) CircularProgressIndicator(color = DeepNavy, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                else Icon(if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (s.playing) "Pause" else "Play", tint = DeepNavy)
-            }
-            IconButton(onClick = { s.seekBy(10_000) }, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Forward10, "Forward 10 s", tint = TextPrimary) }
-            IconButton(onClick = { s.player.seekToNextMediaItem() }, enabled = hasNext, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.SkipNext, "Next", tint = if (hasNext) TextPrimary else TextDisabled) }
-            IconButton(onClick = { AudioSession.stop() }, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Close, "Stop", tint = TextSecondary) }
-        }
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(Modifier.fillMaxWidth().height(3.dp).clip(CircleShape).background(Color(0x26FFFFFF)))
+        Box(Modifier.fillMaxWidth(frac).height(3.dp).clip(CircleShape).background(AccentBlue))
+    }
+}
+
+/** −10 s / +10 s, sized to take the place of the chevron on a folder row. */
+@Composable
+fun AudioSkipButtons() {
+    val s = AudioSession.player ?: return
+    Row {
+        IconButton(onClick = { s.seekBy(-10_000) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Replay10, "Back 10 seconds", tint = TextSecondary, modifier = Modifier.size(22.dp)) }
+        IconButton(onClick = { s.seekBy(10_000) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Forward10, "Forward 10 seconds", tint = TextSecondary, modifier = Modifier.size(22.dp)) }
     }
 }

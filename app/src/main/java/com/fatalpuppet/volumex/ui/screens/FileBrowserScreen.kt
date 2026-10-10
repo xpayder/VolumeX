@@ -192,10 +192,6 @@ fun FileBrowserScreen(
                 }
             }
 
-            // grid view has no row to expand, so the same controls sit under the header
-            AnimatedVisibility(visible = AudioSession.active && (viewMode == ViewMode.GRID || searchActive && searchQuery.isNotBlank())) {
-                AudioMiniControls(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), showTitle = true)
-            }
             AnimatedVisibility(visible = searchActive) {
                 BrowserSearchField(searchQuery, { viewModel.search(it) }, { searchActive = false; viewModel.search("") })
             }
@@ -215,16 +211,12 @@ fun FileBrowserScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()
                 ) {
                     items(display, key = { it.path }) { e ->
-                        GridCell(e, selected.contains(e.path), { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, { viewModel.toggleSelection(e) }, { sheetEntry = e })
+                        GridCell(e, selected.contains(e.path), AudioSession.currentPath == e.path, { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, { viewModel.toggleSelection(e) }, { sheetEntry = e })
                     }
                 }
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = headerDp + 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     items(display, key = { it.path }) { e ->
-                        val playing = AudioSession.currentPath == e.path
-                        Column {
-                            FileListItem(entry = e, isSelected = selected.contains(e.path), highlight = playing, onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
-                            AnimatedVisibility(visible = playing) { AudioMiniControls(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 6.dp)) }
-                        }
+                        FileListItem(entry = e, isSelected = selected.contains(e.path), highlight = AudioSession.currentPath == e.path, onClick = { if (selected.isNotEmpty()) viewModel.toggleSelection(e) else open(e) }, onLongClick = { sheetEntry = e })
                     }
                 }
             }
@@ -347,12 +339,12 @@ private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, labe
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onMenu: () -> Unit) {
+private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, playing: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onMenu: () -> Unit) {
     val context = LocalContext.current
     Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(DarkCard)
-                .border(if (isSelected) 2.dp else 1.dp, if (isSelected) AccentBlue else GlassBorderFaint, RoundedCornerShape(14.dp)),
+                .border(if (isSelected || playing) 2.dp else 1.dp, if (isSelected || playing) AccentBlue else GlassBorderFaint, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (entry.fileType == FileType.VIDEO) {
@@ -362,6 +354,8 @@ private fun GridCell(entry: FileSystemEntry, isSelected: Boolean, onClick: () ->
                     model = ImageRequest.Builder(context).data(DriveFileProvider.buildUri(entry.inodeOid, entry.path)).size(360).crossfade(true).build(),
                     contentDescription = entry.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
                 )
+            } else if (playing) {
+                Icon(if (AudioSession.player?.playing == true) Icons.Default.Pause else Icons.Default.PlayArrow, null, tint = AccentBlue, modifier = Modifier.size(44.dp))
             } else {
                 Icon(
                     when (entry.fileType) {

@@ -1,6 +1,11 @@
 package com.fatalpuppet.volumex.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import com.fatalpuppet.volumex.ui.screens.AudioPlayButton
+import com.fatalpuppet.volumex.ui.screens.AudioSeekLine
+import com.fatalpuppet.volumex.ui.screens.AudioSkipButtons
+import com.fatalpuppet.volumex.ui.screens.AudioTimeText
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,54 +43,52 @@ fun FileListItem(
     onLongClick: () -> Unit = {}
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) GlassWhite16 else if (highlight) GlassWhite8 else Color.Transparent,
+        targetValue = if (isSelected) GlassWhite16 else if (highlight) AccentBlue.copy(alpha = 0.09f) else Color.Transparent,
         label = "bgColor"
     )
-    val borderColor = if (isSelected) AccentBlue else Color.Transparent
+    val borderColor = if (isSelected) AccentBlue else if (highlight) AccentBlue.copy(alpha = 0.28f) else Color.Transparent
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .animateContentSize()
+            .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        // File icon
-        FileIconBox(entry)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = if (highlight) 8.dp else 16.dp, top = 12.dp, bottom = if (highlight) 2.dp else 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (highlight) AudioPlayButton() else FileIconBox(entry)
 
-        Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(12.dp))
 
-        // Name + metadata
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.name,
-                color = if (highlight) AccentBlue else TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            val dateText = formatDate(entry.modifiedAt)
-            val meta = listOfNotNull(
-                if (entry.isDirectory) "Folder" else entry.formattedSize,
-                dateText.ifEmpty { null }
-            ).joinToString(" · ")
-            Text(text = meta, color = TextTertiary, fontSize = 12.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.name,
+                    color = if (highlight) AccentBlue else TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                if (highlight) AudioTimeText() else {
+                    val dateText = formatDate(entry.modifiedAt)
+                    val meta = listOfNotNull(
+                        if (entry.isDirectory) "Folder" else entry.formattedSize,
+                        dateText.ifEmpty { null }
+                    ).joinToString(" · ")
+                    Text(text = meta, color = TextTertiary, fontSize = 12.sp)
+                }
+            }
+
+            if (highlight) AudioSkipButtons()
+            else if (entry.isDirectory) Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(18.dp))
         }
-
-        // Chevron for directories
-        if (entry.isDirectory) {
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = TextTertiary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
+        if (highlight) AudioSeekLine(Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp))
     }
 }
 
