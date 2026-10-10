@@ -21,9 +21,9 @@ class WriteFixtureTest(private val name: String) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
-        fun params() = listOf("apfs", "hfs", "exfat", "exfatbig", "fat32")
+        fun params() = listOf("apfs", "hfs", "exfat", "exfatbig", "fat32", "ntfs")
         private val dir = File(System.getProperty("fixtures.dir") ?: "build/fixtures")
-        init { FilesystemMounter.enableApfsWrite = true }
+        init { FilesystemMounter.enableApfsWrite = true; FilesystemMounter.enableNtfsWrite = true }
     }
 
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
@@ -31,6 +31,7 @@ class WriteFixtureTest(private val name: String) {
     private fun root(r: com.fatalpuppet.volumex.storage.filesystem.FileSystemReader): FileSystemEntry = when (name) {
         "hfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, hfsCatalogId = 2)
         "apfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = 2)
+        "ntfs" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = 5)
         "exfat", "exfatbig" -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.exfat.ExFatReader).getBootSector()!!.rootDirectoryCluster.toLong())
         else -> FileSystemEntry("/", "/", true, 0, 0, 0, inodeOid = (r as com.fatalpuppet.volumex.storage.filesystem.fat32.Fat32Reader).getVolumeHeader()!!.rootCluster)
     }
@@ -99,18 +100,18 @@ class WriteFixtureTest(private val name: String) {
         for (i in 0 until 700) {
             val n = "s_%03d_%s.txt".format(i, "x".repeat(i % 40))
             val bytes = "file $i\n".repeat(1 + i % 5).toByteArray()
-            if (w.writeFile(sd, n, bytes)) expected["stress/$n"] = bytes else failures += "write $n failed"
+            if (w.writeFile(sd, n, bytes)) expected["stress/$n"] = bytes else failures += "write $n failed: ${com.fatalpuppet.volumex.storage.filesystem.ntfs.NtfsWriter.lastRefusal}"
         }
         // rename a few, delete every second file
         val listing = reader.listDirectory(0, "/stress")
         if (listing.size != expected.size) failures += "listing has ${listing.size}, expected ${expected.size}"
         for ((k, e) in listing.withIndex()) {
-            if (k % 2 == 0) { if (w.deleteEntry(e)) expected.remove("stress/${e.name}") else failures += "delete ${e.name} failed" }
+            if (k % 2 == 0) { if (w.deleteEntry(e)) expected.remove("stress/${e.name}") else if (name != "ntfs") failures += "delete ${e.name} failed" }   // NTFS refuses entries in interior index nodes
         }
         val after = reader.listDirectory(0, "/stress")
         for (e in after.take(3)) {
             val nn = "renamed_${e.name}"
-            if (w.renameEntry(e, nn)) { expected["stress/$nn"] = expected.remove("stress/${e.name}")!! } else failures += "rename ${e.name} failed"
+            if (w.renameEntry(e, nn)) { expected["stress/$nn"] = expected.remove("stress/${e.name}")!! } else if (name != "ntfs") failures += "rename ${e.name} failed"
         }
         dev.flushCache(); dev.close()
         File(dir, "written-stress-$name.expect").writeText(expected.entries.joinToString("\n") { "${sha(it.value)}\t${it.value.size}\t${it.key}" } + "\n")

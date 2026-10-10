@@ -25,6 +25,8 @@ import com.fatalpuppet.volumex.storage.filesystem.partition.MbrPartitionTable
 object FilesystemMounter {
     /** Opt-in switch for the experimental APFS writer (Settings > Experimental). */
     @Volatile var enableApfsWrite: Boolean = false
+    /** Opt-in switch for the experimental NTFS writer (Settings > Experimental). */
+    @Volatile var enableNtfsWrite: Boolean = false
     private const val TAG = "VolumeX"
 
     /** A filesystem found on the device (one per partition; APFS may expose several volumes). */
@@ -120,14 +122,18 @@ object FilesystemMounter {
     }
 
     /** Mounts the filesystem inside an unlocked container (starts at sector 0 of [device]); never a nested BitLocker. */
-    fun mountInner(device: BlockDeviceReader): Pair<FileSystemReader, FileSystemWriter?>? =
-        tryNtfs(device, 0) ?: tryExFat(device, 0)?.let { it.first to null } ?: tryFat32(device, 0)?.let { it.first to null } ?: tryHfsPlus(device, 0)?.let { it.first to null }
+    fun mountInner(device: BlockDeviceReader): Pair<FileSystemReader, FileSystemWriter?>? {
+        // BitLocker volumes stay read-only: nothing is re-encrypted, so the inner writers are dropped
+        return tryNtfs(device, 0, allowWrite = false)?.let { it.first to null } ?: tryExFat(device, 0)?.let { it.first to null }
+            ?: tryFat32(device, 0)?.let { it.first to null } ?: tryHfsPlus(device, 0)?.let { it.first to null }
+    }
 
-    private fun tryNtfs(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {
+    private fun tryNtfs(device: BlockDeviceReader, lba: Long, allowWrite: Boolean = true): Pair<FileSystemReader, FileSystemWriter?>? {
         val reader = com.fatalpuppet.volumex.storage.filesystem.ntfs.NtfsReader(device, lba)
         if (!reader.mount()) return null
         Log.i(TAG, "NTFS at LBA $lba")
-        return Pair(reader, null)   // read-only
+        // Experimental writer: off unless the user enabled it (Settings > Experimental); never for a BitLocker container
+        return Pair(reader, if (enableNtfsWrite && allowWrite) com.fatalpuppet.volumex.storage.filesystem.ntfs.NtfsWriter(reader) else null)
     }
 
     private fun tryFat32(device: BlockDeviceReader, lba: Long): Pair<FileSystemReader, FileSystemWriter?>? {

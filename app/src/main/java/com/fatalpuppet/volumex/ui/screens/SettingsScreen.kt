@@ -71,6 +71,8 @@ fun SettingsScreen(
                     val prefs = remember { context.getSharedPreferences("vx_prefs", android.content.Context.MODE_PRIVATE) }
                     var apfsWrite by remember { mutableStateOf(prefs.getBoolean("apfs_write", false)) }
                     var confirmApfs by remember { mutableStateOf(false) }
+                    var ntfsWrite by remember { mutableStateOf(prefs.getBoolean("ntfs_write", false)) }
+                    var confirmNtfs by remember { mutableStateOf(false) }
                     SettingsSection(title = "Experimental") {
                         SettingsToggleRow(
                             icon = Icons.Default.Warning,
@@ -78,6 +80,27 @@ fun SettingsScreen(
                             subtitle = "Edits the drive in place (not copy-on-write). Checked against macOS fsck_apfs, but a power loss or unplugging during a write can leave the drive needing repair on a Mac. Keep a backup. Applies the next time you connect a drive.",
                             checked = apfsWrite,
                             onToggle = { if (apfsWrite) { apfsWrite = false; prefs.edit().putBoolean("apfs_write", false).apply(); com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableApfsWrite = false } else confirmApfs = true }
+                        )
+                        SettingsToggleRow(
+                            icon = Icons.Default.Warning,
+                            title = "Write to NTFS drives",
+                            subtitle = "Creates, renames and deletes files and folders on Windows drives. Checked against ntfs-3g, not against Windows chkdsk. Only works on drives Windows shut down cleanly (turn off Fast Startup); it refuses otherwise. Keep a backup. Applies the next time you connect a drive.",
+                            checked = ntfsWrite,
+                            onToggle = { if (ntfsWrite) { ntfsWrite = false; prefs.edit().putBoolean("ntfs_write", false).apply(); com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableNtfsWrite = false } else confirmNtfs = true }
+                        )
+                    }
+                    if (confirmNtfs) {
+                        AlertDialog(
+                            onDismissRequest = { confirmNtfs = false },
+                            title = { Text("Enable NTFS writing?", color = TextPrimary) },
+                            text = { Text("This is experimental. Use it only on drives you have backed up, make sure Windows fully shut down (not hibernated), and never unplug the drive during a transfer.", color = TextSecondary) },
+                            confirmButton = { TextButton(onClick = {
+                                ntfsWrite = true; confirmNtfs = false
+                                prefs.edit().putBoolean("ntfs_write", true).apply()
+                                com.fatalpuppet.volumex.storage.filesystem.FilesystemMounter.enableNtfsWrite = true
+                            }) { Text("Enable", color = AccentBlue) } },
+                            dismissButton = { TextButton(onClick = { confirmNtfs = false }) { Text("Cancel", color = TextTertiary) } },
+                            containerColor = DarkCard, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
                         )
                     }
                     if (confirmApfs) {

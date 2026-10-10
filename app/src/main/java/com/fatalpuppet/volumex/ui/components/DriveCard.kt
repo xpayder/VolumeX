@@ -94,7 +94,7 @@ fun DriveCard(
             ) {
                 Icon(Icons.Default.Info, null, tint = AccentOrange, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("Writing to APFS is experimental and off by default. Tap to enable it in Settings.", color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                Text("Writing to ${volume.type} is experimental and off by default. Tap to enable it in Settings.", color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
             }
         }
 

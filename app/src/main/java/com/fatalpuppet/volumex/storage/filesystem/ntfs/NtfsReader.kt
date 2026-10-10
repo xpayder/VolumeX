@@ -24,26 +24,37 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         fun isBitLocker(bootSector: ByteArray) = bootSector.size >= 11 && String(bootSector, 3, 8, Charsets.ISO_8859_1) == "-FVE-FS-"
     }
 
-    private var bytesPerSector = 512
-    private var clusterSize = 4096
-    private var recSize = 1024
-    private var idxBlockSize = 4096
-    private var totalClusters = 0L
+    internal var bytesPerSector = 512; private set
+    internal var clusterSize = 4096; private set
+    internal var recSize = 1024; private set
+    internal var idxBlockSize = 4096; private set
+    internal var totalClusters = 0L; private set
     private var serial = 0L
-    private var mft: Stream? = null
+    private var mftLcn = 0L
+    private var sectorsPerCluster = 8
+    internal var mft: Stream? = null; private set
     private var mounted = false
 
     // ---- low level ----
-    private class Run(val vcn: Long, val len: Long, val lcn: Long)   // lcn < 0 = sparse hole
-    private class Attr(
+    internal class Run(val vcn: Long, val len: Long, val lcn: Long)   // lcn < 0 = sparse hole
+    internal class Attr(
         val type: Int, val name: String, val nonResident: Boolean, val flags: Int,
         val resident: ByteArray?, val startVcn: Long, val runs: List<Run>,
         val realSize: Long, val initSize: Long, val compUnit: Int
     )
 
-    private inner class Stream(val runs: List<Run>, val realSize: Long, val initSize: Long, val compressed: Boolean, val unitClusters: Int, val resident: ByteArray?) {
+    internal inner class Stream(val runs: List<Run>, val realSize: Long, val initSize: Long, val compressed: Boolean, val unitClusters: Int, val resident: ByteArray?) {
         private var unitCache: ByteArray? = null
         private var unitCacheIdx = -1L
+
+        /** Absolute device sector (512 B) that holds byte [offset] of this non-resident, uncompressed stream; -1 if unmapped. */
+        fun physSector(offset: Long): Long {
+            if (resident != null || compressed) return -1
+            val vcn = offset / clusterSize
+            val r = runAt(vcn) ?: return -1
+            if (r.lcn < 0) return -1
+            return startLba + ((r.lcn + (vcn - r.vcn)) * clusterSize + offset % clusterSize) / bytesPerSector
+        }
 
         fun read(offset: Long, buf: ByteArray, bufOff: Int, len: Int): Int {
             if (offset >= realSize) return 0
@@ -127,13 +138,13 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         }
     }
 
-    private fun filetimeToMs(ft: Long) = if (ft <= 0) 0L else ft / 10_000 - FT_EPOCH_DIFF_MS
-    private fun u16(b: ByteArray, o: Int) = (b[o].toInt() and 0xFF) or ((b[o + 1].toInt() and 0xFF) shl 8)
-    private fun u32(b: ByteArray, o: Int) = u16(b, o).toLong() or (u16(b, o + 2).toLong() shl 16)
-    private fun u64(b: ByteArray, o: Int) = u32(b, o) or (u32(b, o + 4) shl 32)
+    internal fun filetimeToMs(ft: Long) = if (ft <= 0) 0L else ft / 10_000 - FT_EPOCH_DIFF_MS
+    internal fun u16(b: ByteArray, o: Int) = (b[o].toInt() and 0xFF) or ((b[o + 1].toInt() and 0xFF) shl 8)
+    internal fun u32(b: ByteArray, o: Int) = u16(b, o).toLong() or (u16(b, o + 2).toLong() shl 16)
+    internal fun u64(b: ByteArray, o: Int) = u32(b, o) or (u32(b, o + 4) shl 32)
 
     /** Restores the bytes that the update-sequence array replaced at the end of every 512-byte stride. */
-    private fun applyFixups(b: ByteArray, usaOff: Int, usaCount: Int): Boolean {
+    internal fun applyFixups(b: ByteArray, usaOff: Int, usaCount: Int): Boolean {
         if (usaCount < 2 || usaOff + usaCount * 2 > b.size) return false
         val usn0 = b[usaOff]; val usn1 = b[usaOff + 1]
         for (i in 1 until usaCount) {
@@ -145,7 +156,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         return true
     }
 
-    private fun decodeRuns(b: ByteArray, start: Int, end: Int, startVcn: Long): List<Run> {
+    internal fun decodeRuns(b: ByteArray, start: Int, end: Int, startVcn: Long): List<Run> {
         val out = ArrayList<Run>(); var p = start; var vcn = startVcn; var lcn = 0L
         while (p < end) {
             val h = b[p].toInt() and 0xFF
@@ -169,7 +180,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         return out
     }
 
-    private fun parseAttrs(rec: ByteArray): List<Attr> {
+    internal fun parseAttrs(rec: ByteArray): List<Attr> {
         val out = ArrayList<Attr>()
         var p = u16(rec, 0x14)
         while (p + 8 <= rec.size) {
@@ -195,7 +206,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         return out
     }
 
-    private fun readRecord(n: Long): ByteArray? {
+    internal fun readRecord(n: Long): ByteArray? {
         val m = mft
         val buf = ByteArray(recSize)
         if (m == null) {                                       // bootstrap: $MFT record 0 at the boot-sector MFT cluster
@@ -210,7 +221,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
     private val attrCache = object : LinkedHashMap<Long, List<Attr>?>(256, 0.75f, true) { override fun removeEldestEntry(e: MutableMap.MutableEntry<Long, List<Attr>?>) = size > 512 }
 
     /** All attributes of a file including those stored in extension records (via $ATTRIBUTE_LIST). */
-    private fun allAttrs(n: Long): List<Attr>? {
+    internal fun allAttrs(n: Long): List<Attr>? {
         if (attrCache.containsKey(n)) return attrCache[n]
         val rec = readRecord(n) ?: return null.also { attrCache[n] = null }
         if (u16(rec, 0x16) and 1 == 0) return null.also { attrCache[n] = null }     // record not in use
@@ -236,7 +247,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
     }
 
     /** Builds a data stream from all fragments of one attribute (same type and name). */
-    private fun streamOf(frags: List<Attr>): Stream? {
+    internal fun streamOf(frags: List<Attr>): Stream? {
         val sorted = frags.sortedBy { it.startVcn }
         val first = sorted.firstOrNull() ?: return null
         if (!first.nonResident) return Stream(emptyList(), first.resident!!.size.toLong(), first.resident.size.toLong(), false, 0, first.resident)
@@ -245,7 +256,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         return Stream(runs, first.realSize, first.initSize, compressed, if (compressed) 1 shl first.compUnit else 0, null)
     }
 
-    private fun dataStream(n: Long): Stream? {
+    internal fun dataStream(n: Long): Stream? {
         val attrs = allAttrs(n) ?: return null
         if (attrs.any { it.type == ATTR_DATA && it.flags and 0x4000 != 0 }) return null       // EFS-encrypted
         return streamOf(attrs.filter { it.type == ATTR_DATA && it.name.isEmpty() })
@@ -262,6 +273,7 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
         val totalSectors = u64(boot, 0x28)
         totalClusters = totalSectors / spc
         val mftClu = u64(boot, 0x30)
+        mftLcn = mftClu; sectorsPerCluster = spc
         val cpr = boot[0x40].toInt()                                  // signed
         recSize = if (cpr > 0) cpr * clusterSize else 1 shl (-cpr)
         val cpi = boot[0x44].toInt()
@@ -421,6 +433,21 @@ class NtfsReader(private val dev: BlockDeviceReader, private val startLba: Long)
             totalBlocks = totalClusters, blockSize = clusterSize.toLong(), freeBlocks = free ?: 0L, freeKnown = free != null
         ))
     }
+
+    /** Re-reads $MFT's own record (after the writer grew the MFT) so record lookups see the new runlist. */
+    internal fun reloadMft(): Boolean {
+        val raw = dev.readSectors(startLba + mftLcn * sectorsPerCluster, recSize / bytesPerSector) ?: return false
+        if (String(raw, 0, 4, Charsets.ISO_8859_1) != "FILE" || !applyFixups(raw, u16(raw, 4), u16(raw, 6))) return false
+        mft = streamOf(parseAttrs(raw).filter { it.type == ATTR_DATA && it.name.isEmpty() }) ?: return false
+        invalidate()
+        return true
+    }
+
+    /** Drops cached records / listings after a write so the next read sees the new state. */
+    internal fun invalidate() { attrCache.clear(); dirCache.clear(); freeClusters = null }
+
+    internal val device: BlockDeviceReader get() = dev
+    internal val volumeStartLba: Long get() = startLba
 
     override fun unmount() { mounted = false; mft = null; attrCache.clear(); dirCache.clear() }
 }
